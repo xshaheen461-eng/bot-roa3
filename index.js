@@ -11,37 +11,24 @@ const { state, saveCreds } = await useMultiFileAuthState('./session')
 const sock = makeWASocket({
   auth: state, 
   logger: P({ level: 'silent' }),
-  browser: Browsers.macOS('Safari'),
+  browser: Browsers.macOS('Desktop'),
   printQRInTerminal: false
 })
-
 sock.ev.on('creds.update', saveCreds)
 
 if (!sock.authState.creds.registered){
-  await delay(4000)
-  try{ 
-    let code = await sock.requestPairingCode("218920972444")
-    console.log("كود الربط: " + code)
-  }catch(e){ 
-    console.log("فشل الطلب، نعاود المحاولة... " + e.message)
-    setTimeout(()=>startBot(), 10000)
-    return
-  }
+  await delay(5000)
+  let code = await sock.requestPairingCode("218920972444")
+  console.log("==========")
+  console.log("كود الربط النهائي: " + code)
+  console.log("عندك 3 دقايق باش تربط")
+  console.log("==========")
+  // معاش نعاود نطلب، نستنى بس
+  return
 }
 
-sock.ev.on('connection.update', async (u)=>{
-  if(u.connection==='open'){ console.log("✅ اشتغل بنجاح") }
-  if(u.connection==='close'){
-    let reason = u.lastDisconnect?.error?.output?.statusCode
-    if(reason !== 401) {
-      console.log("اعادة تشغيل...")
-      setTimeout(()=>startBot(),5000)
-    }
-  }
+sock.ev.on('connection.update', (u)=>{
+  if(u.connection==='open') console.log("✅ تم الربط بنجاح!")
 })
 }
 startBot()
-
-// باش ما يطيحش البوت مع اي خطا
-process.on('uncaughtException', (e)=>{ console.log("خطا: " + e.message) })
-process.on('unhandledRejection', (e)=>{ console.log("رفض: " + e.message) })
