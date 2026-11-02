@@ -125,10 +125,6 @@ const sock = makeWASocket({
   retryRequestDelayMs: 2000
 })
 
-if (!sock.authState.creds.registered){
-  await delay(3000)
-  try{ let code=await sock.requestPairingCode("218920972444"); console.log("كود الربط: "+code) }catch(e){ console.log("فشل:", e.message) }
-}
 sock.ev.on('creds.update', saveCreds)
 sock.ev.on('connection.update', async (u)=>{
   if(u.qr){ lastQR = u.qr; console.log("QR جاهز في /qr") }
