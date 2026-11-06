@@ -1,31 +1,22 @@
-// === سيرفر QR ===
-const express = require('express')
-const app = express()
-const QRCode = require('qrcode')
-let lastQR = ""
-app.get('/', (req,res) => res.send('<h1>BOT LIVE ✅</h1><a href="/qr"><h2>QR CODE</h2></a>'))
-app.get('/qr', async (req,res) => {
-  if(!lastQR) return res.send('<h1>استنى 10 ثواني ودير تحديث...</h1><script>setTimeout(()=>location.reload(),5000)</script>')
-  let img = await QRCode.toDataURL(lastQR)
-  res.send(`<center><img src="${img}" style="width:350px"><h2>امسح الـ QR من واتساب</h2></center><script>setTimeout(()=>location.reload(),15000)</script>`)
-})
-app.listen(process.env.PORT || 3000)
-
-// === كود الحماية متاعك كامل ===
+// ====== بوت حماية V2 - نسخة آمنة ضد البند ======
+require('dotenv').config()
 let _log = console.log
 console.log = (...a) => {
   let s = (a[0]||'').toString()
   if(s.includes('Closing session') || s.includes('SessionEntry') || s.includes('baseKey') || s.includes('preKeyId') || s.includes('Cipher') || s.includes('Session')) return
   _log(...a)
 }
-process.on('uncaughtException', (e)=>{})
-process.on('unhandledRejection', (e)=>{})
+process.on('uncaughtException', ()=>{})
+process.on('unhandledRejection', ()=>{})
 process.on('SIGTERM', ()=>{})
 process.on('SIGINT', ()=>{})
 
 const { default: makeWASocket, useMultiFileAuthState, delay, Browsers } = require('@whiskeysockets/baileys')
 const P = require('pino')
 const fs = require('fs')
+
+const OWNER_NUMBER = (process.env.OWNER_NUMBER || "").replace(/\D/g,'')
+const BOT_NUMBER = (process.env.BOT_NUMBER || "").replace(/\D/g,'')
 
 const BAD_WORDS = ["http://","https://","t.me",".com","wa.me","chat.whatsapp.com","bit.ly"]
 const BAN_WORDS = [".band",".ban",".تبنيد",".باند","تبنيد","باند",".فنش","فنش",".تفجير","تفجير"]
@@ -34,11 +25,12 @@ const ALLOWED_CODES = ["218","20","212","213","216","222","249","211","252","253
 function isOwner(jid){
   if(!jid) return false
   let d = jid.replace(/\D/g,'')
-  return d.includes("920972444")
+  if(!OWNER_NUMBER) return false
+  return d.includes(OWNER_NUMBER) || d.endsWith(OWNER_NUMBER.slice(-9))
 }
 
 let whiteList = new Map()
-try{ 
+try{
   let raw = fs.readFileSync('./whitelist.json','utf8')
   let data = JSON.parse(raw)
   if(Array.isArray(data)){
@@ -62,13 +54,13 @@ function findBlackMatch(jid){ let d=getLastDigits(jid); for(let [bJid] of blackL
 let reportHistory = new Map()
 try{ if(fs.existsSync('./report-history.json')) reportHistory = new Map(JSON.parse(fs.readFileSync('./report-history.json'))) }catch{}
 function saveReportHistory(){ try{ fs.writeFileSync('./report-history.json', JSON.stringify([...reportHistory])) }catch{} }
-const REPORT_HISTORY_LIMIT = 2
+const REPORT_HISTORY_LIMIT = 3
 
 let joinTracker = new Map()
 let recentJoins = new Map()
 let lockedGroups = new Set()
-const FLOOD_LIMIT = 6
-const FLOOD_TIME = 15000
+const FLOOD_LIMIT = 10
+const FLOOD_TIME = 20000
 setInterval(()=>{ joinTracker.clear(); recentJoins.clear(); if(global.gc) global.gc() }, 60*60*1000)
 
 function isFloodAttack(groupId){
@@ -91,7 +83,7 @@ function isAllowedNumber(jid){
 async function hasNoProfilePic(sock,jid){ try{ await sock.profilePictureUrl(jid,'image'); return false }catch{ return true } }
 
 let reports = new Map()
-const REPORT_LIMIT = 2
+const REPORT_LIMIT = 4
 const REPORT_TIME = 10*60*1000
 function addReport(groupId, targetJid, reporterJid){
   if(!reports.has(groupId)) reports.set(groupId, new Map())
@@ -112,27 +104,33 @@ async function startBot(){
 try{
 const { state, saveCreds } = await useMultiFileAuthState('./session')
 const sock = makeWASocket({
-  auth: state, 
+  auth: state,
   logger: P({ level: 'silent' }),
   browser: Browsers.macOS('Safari'),
   printQRInTerminal: false,
-  keepAliveIntervalMs: 25000 + Math.random()*10000,
+  keepAliveIntervalMs: 30000 + Math.random()*10000,
   markOnlineOnConnect: false,
   syncFullHistory: false,
   emitOwnEvents: false,
   defaultQueryTimeoutMs: 60000,
   connectTimeoutMs: 60000,
-  retryRequestDelayMs: 2000
+  retryRequestDelayMs: 3000
 })
 
+if (!sock.authState.creds.registered){
+  await delay(3000)
+  try{
+    if(!BOT_NUMBER) return console.log("حط BOT_NUMBER في .env")
+    let code=await sock.requestPairingCode(BOT_NUMBER); console.log("كود الربط: "+code)
+  }catch(e){ console.log("فشل:", e.message) }
+}
 sock.ev.on('creds.update', saveCreds)
 sock.ev.on('connection.update', async (u)=>{
-  if(u.qr){ lastQR = u.qr; console.log("QR جاهز في /qr") }
-  if(u.connection==='open'){ console.log("✅ اشتغل | البيضاء: "+whiteList.size); lastQR="" }
+  if(u.connection==='open'){ console.log("✅ اشتغل | البيضاء: "+whiteList.size+" | البلاك: "+blackList.size) }
   if(u.connection==='close'){
     let code=u.lastDisconnect?.error?.output?.statusCode
-    if(code===401) return console.log("جلسة منتهية")
-    setTimeout(()=>startBot(),5000 + Math.random()*5000)
+    if(code===401) return console.log("جلسة منتهية - امسح session")
+    setTimeout(()=>startBot(),10000 + Math.random()*5000)
   }
 })
 
@@ -150,9 +148,9 @@ async function processQueue(){
   if(kickQueue.length==0){ isProcessingQueue=false; return }
   isProcessingQueue=true
   let now = Date.now()
-  if(now - lastKickTime > 5000){ kicksInWindow=0; lastKickTime=now }
-  if(kicksInWindow >= 2){
-    let wait = 5000 - (now - lastKickTime) + 1000 + Math.random()*1000
+  if(now - lastKickTime > 8000){ kicksInWindow=0; lastKickTime=now }
+  if(kicksInWindow >= 1){
+    let wait = 8000 - (now - lastKickTime) + 1000 + Math.random()*1500
     await delay(wait)
     kicksInWindow=0
     lastKickTime=Date.now()
@@ -160,20 +158,20 @@ async function processQueue(){
   let {groupId, jid, resolve} = kickQueue[0]
   try{
     if(!jid||!jid.includes('@') || isWhiteListed(jid) || isOwner(jid)){
-      kickQueue.shift(); resolve(false); return setTimeout(processQueue, 200)
+      kickQueue.shift(); resolve(false); return setTimeout(processQueue, 300)
     }
-    await delay(1800 + Math.random()*1200)
+    await delay(4000 + Math.random()*2000)
     await sock.groupParticipantsUpdate(groupId,[jid],'remove')
     kicksInWindow++; lastKickTime=Date.now()
     kickQueue.shift(); resolve(true)
   }catch(e){ kickQueue.shift(); resolve(false) }
-  setTimeout(processQueue, 800 + Math.random()*700)
+  setTimeout(processQueue, 1200 + Math.random()*800)
 }
 
 async function secureGroup(groupId){
   try{
     await sock.groupRevokeInvite(groupId).catch(()=>{})
-    await delay(800 + Math.random()*500)
+    await delay(1200 + Math.random()*800)
     await sock.groupSettingUpdate(groupId,'announcement').catch(()=>{})
   }catch{}
 }
@@ -191,7 +189,7 @@ async function lockDownGroup(groupId,attackers=[]){
   }
   saveBlackList()
   try{
-    await delay(1000)
+    await delay(1500)
     await sock.sendMessage(groupId,{text:`🚨 تم كشف هجوم تبنيد!\nتم الغاء رابط القروب وقفله 5 دقايق`}).catch(()=>{})
     setTimeout(async()=>{
       try{
@@ -212,24 +210,24 @@ setInterval(async ()=>{
       try{
         let reqs = await sock.groupRequestParticipantsList(id).catch(()=>[])
         if(!reqs || reqs.length==0) continue
-        if(reqs.length >= 5){
+        if(reqs.length >= 8){
           await lockDownGroup(id, []).catch(()=>{})
           await sock.sendMessage(id,{text:`🚨 هجوم طلبات انضمام!\n📥 ${reqs.length} طلب\n🔒 تم قفل القروب ورفضهم`}).catch(()=>{})
         }
         for(let r of reqs){
           let jid = r.jid || r.id || r.participant
           if(!jid) continue
-          if(isBlackListed(jid) || !isAllowedNumber(jid) || reqs.length>=3){
+          if(isBlackListed(jid) || !isAllowedNumber(jid) || reqs.length>=5){
             await sock.groupRequestParticipantsUpdate(id, [jid], 'reject').catch(()=>{})
           } else {
             await sock.groupRequestParticipantsUpdate(id, [jid], 'approve').catch(()=>{})
           }
-          await delay(900 + Math.random()*400)
+          await delay(1500 + Math.random()*800)
         }
       }catch{}
     }
   }catch{}
-}, 15000 + Math.random()*5000)
+}, 60000 + Math.random()*10000)
 
 sock.ev.on('group-participants.update', async (u)=>{
 try{
@@ -257,8 +255,9 @@ if(u.action == 'add'){
      if(isBlackListed(p)){ await safeKick(u.id, p); continue }
      if(!isAllowedNumber(p)){ await safeKick(u.id, p); continue }
      if(lockedGroups.has(u.id)){ await safeKick(u.id, p); continue }
-     let noPic = await hasNoProfilePic(sock, p)
-     if(noPic){ await safeKick(u.id, p); blackList.set(p, {name: "بدون صورة", time: new Date().toLocaleString()}); saveBlackList() }
+     // تم ايقاف طرد بدون صورة - يسبب بند
+     // let noPic = await hasNoProfilePic(sock, p)
+     // if(noPic){ await safeKick(u.id, p); blackList.set(p, {name: "بدون صورة", time: new Date().toLocaleString()}); saveBlackList() }
    }catch{}
  }
 }
@@ -269,9 +268,9 @@ if(u.action == 'remove' || u.action == 'leave'){
       for(let p of u.participants){
         let joinTime = joins.get(p)
         if(joinTime && (Date.now() - joinTime < 10000)){
-          blackList.set(p, {name: "دخول/خروج تبنيد", time: new Date().toLocaleString()})
+          // معاش نقفل القروب على دخول/خروج - بس نسجل
+          blackList.set(p, {name: "دخول/خروج سريع", time: new Date().toLocaleString()})
           saveBlackList()
-          await lockDownGroup(u.id, [p])
         }
         joins.delete(p)
       }
@@ -286,7 +285,7 @@ if(u.action == 'promote' || u.action == 'demote'){
       if(u.author && !isWhiteListed(u.author) && !isOwner(u.author)){
         blackList.set(u.author, {name: "سحب اشراف البوت", time: new Date().toLocaleString()})
         saveBlackList()
-        await delay(1000)
+        await delay(2000)
         await safeKick(u.id, u.author).catch(()=>{})
       }
     }
@@ -338,10 +337,11 @@ if((body=='.ابلاغ' || lowerBody=='ابلاغ' || lowerBody=='بلاغ') && 
   return
 }
 
+// تعديل: كلمة تبنيد = مسح فقط، بدون طرد وبدون قفل - يقلل البند
 if(BAN_WORDS.some(w=>lowerBody.includes(w))){
   if(isOwnerSender){ return }
   if(isSenderWhite){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); return }
-  else { await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); await lockDownGroup(from,[sender]).catch(()=>{}); await safeKick(from,sender).catch(()=>{}); blackList.set(sender,{name:`كلمة تبنيد: ${body.slice(0,20)}`,time:new Date().toLocaleString()}); saveBlackList(); return }
+  else { await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); return }
 }
 
 if(lowerBody.includes('بيضاء') || lowerBody.includes('بيضا')){
@@ -419,7 +419,8 @@ if(body.startsWith('.')){
     if(isGroup){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); }
     return
   }
-  if(isGroup){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); await lockDownGroup(from,[]).catch(()=>{}) }
+  // عضو عادي يكتب نقطة - مسح فقط، بدون قفل القروب
+  if(isGroup){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); }
   return
 }
 
@@ -429,7 +430,6 @@ if(isGroup){
   try{
     let lower=text.toLowerCase()
     let ctxInfo = m.message.extendedTextMessage?.contextInfo || {}
-    let fwd = ctxInfo.isForwarded || (ctxInfo.forwardingScore||0)>0
 
     if(body.trim().toUpperCase().startsWith('3EB0')){
       if(isWhiteListed(sender) || isOwner(sender)) return
@@ -440,15 +440,24 @@ if(isGroup){
       return
     }
 
-    if(m.message.contactMessage||m.message.contactsArrayMessage){ await lockDownGroup(from,[sender]).catch(()=>{}); await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); await safeKick(from,sender).catch(()=>{}); blackList.set(sender,{name:"جهة اتصال ملغمة",time:new Date().toLocaleString()}); saveBlackList(); return }
-    if(isBlackListed(sender)){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); await safeKick(from,sender); return }
-    if(!isAllowedNumber(sender)){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); await safeKick(from,sender); return }
-    if(fwd){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); await safeKick(from,sender); blackList.set(sender,{name:"فورورد",time:new Date().toLocaleString()}); saveBlackList(); return }
-    if(BAD_WORDS.some(w=>lower.includes(w))){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); let joins=recentJoins.get(from); if(joins?.has(sender)){ await lockDownGroup(from,[sender]).catch(()=>{}); await safeKick(from,sender).catch(()=>{}); blackList.set(sender,{name:"رابط تبنيد",time:new Date().toLocaleString()}); saveBlackList(); } return }
+    if(m.message.contactMessage||m.message.contactsArrayMessage){
+      // تعديل: جهة اتصال = مسح + طرد فقط، بدون قفل القروب
+      await sock.sendMessage(from,{delete:m.key}).catch(()=>{})
+      await safeKick(from,sender).catch(()=>{})
+      blackList.set(sender,{name:"جهة اتصال مشبوهة",time:new Date().toLocaleString()}); saveBlackList()
+      return
+    }
+
+    if(BAD_WORDS.some(w=>lower.includes(w))){
+      await sock.sendMessage(from,{delete:m.key}).catch(()=>{})
+      return
+    }
+
   }catch{}
 }
-}catch(e){}
+}catch{}
 })
-}catch(e){ setTimeout(()=>startBot(),5000) }
+
+}catch(e){ console.log("خطأ بدء:", e.message); setTimeout(()=>startBot(), 15000) }
 }
 startBot()
