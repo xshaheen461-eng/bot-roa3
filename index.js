@@ -30,13 +30,11 @@ let stickerCount = {};
 let floodCount = {};
 let joinTimes = {};
 async function notifyOwner(text) {
-  // التنبيهات التلقائية تمشي للوحة تحكم بس، مش للتجريبي، باش يكون مخفي
   if (!sock) return;
   const target = (CONTROL_GROUP && !CONTROL_GROUP.includes('حط هنا')) ? CONTROL_GROUP : ALLOWED_GROUP;
   try { await sock.sendMessage(target, { text }); } catch {}
 }
 async function reply(jid, text) {
-  // رد أوامرك يجي في نفس المكان اللي بعت منه، ويطلع باسم "انت"
   try { await sock.sendMessage(jid, { text }); } catch {}
 }
 async function lockGroup(jid) {
@@ -97,6 +95,12 @@ async function startBot() {
         if (!m.message) continue;
         const from = m.key.remoteJid;
         const isGroup = from?.endsWith('@g.us');
+        // .ايدي يخدم في أي قروب باش نجيب الـ ID، حتى قبل ما نحط الـ ID
+        const _tmpText = m.message.conversation || m.message.extendedTextMessage?.text || '';
+        if (_tmpText.trim() === '.ايدي') {
+          try { await sock.sendMessage(from, { text: 'ID متع القروب:\n' + from }); } catch {}
+          continue;
+        }
         // البوت يخدم في تجريبي ولوحة تحكم بس
         if (isGroup && from !== ALLOWED_GROUP && from !== CONTROL_GROUP) continue;
         const sender = m.key.participant || m.key.remoteJid;
