@@ -20,14 +20,13 @@ const saveLists = () => {
   fs.writeFileSync('settings.json', JSON.stringify({ lockLinks }));
 };
 const norm = s => (s||'').replace(/[^0-9]/g,'');
-// يجيب كل الأرقام من الرسالة، ويفوت الروابط و IDs القروبات
 const extractAllNumbers = (text) => {
   if (!text) return [];
   let clean = text.replace(/https?:\/\/\S+/g,'').replace(/chat\.whatsapp\.com\/\S+/g,'');
   let matches = clean.match(/\d{7,15}/g) || [];
   let out = [];
   for (let n of matches) {
-    if (n.startsWith('12036')) continue; // ID قروب مش رقم
+    if (n.startsWith('12036')) continue;
     if (n.length < 7) continue;
     if (!out.includes(n)) out.push(n);
   }
@@ -103,16 +102,15 @@ async function startBot() {
     for (const m of messages) {
       try {
         if (!m.message) continue;
+        // FIX 1: تجاهل رسائل البوت نفسه - هذا اللي كان يدير في اللوب
+        if (m.key.fromMe) continue;
         const from = m.key.remoteJid;
         const isGroup = from?.endsWith('@g.us');
-        const _tmpText = m.message.conversation || m.message.extendedTextMessage?.text || '';
-        if (_tmpText.trim() === '.ايدي') {
-          try { await sock.sendMessage(from, { text: 'ID متع القروب:\n' + from }); } catch {}
-          continue;
-        }
         const sender = m.key.participant || m.key.remoteJid;
         const senderNum = norm(sender);
-        const isOwnerSender = isOwner(senderNum) || m.key.fromMe || sender === OWNER_NUMBER + '@s.whatsapp.net';
+        // FIX 2: لو الرسالة من رقم البوت نفسه تجاهلها
+        if (sock && sender === sock.user?.id) continue;
+        const isOwnerSender = isOwner(senderNum) || sender === OWNER_NUMBER + '@s.whatsapp.net';
         const isWhiteSender = isWhite(senderNum);
         const isBlackSender = isBlack(senderNum);
         const text = m.message.conversation || m.message.extendedTextMessage?.text || m.message.imageMessage?.caption || m.message.videoMessage?.caption || '';
@@ -133,7 +131,7 @@ async function startBot() {
             menu += '│ 👻 الوضع: يخدم في كل القروبات\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
-            menu += '• .ايدي\n• .حظر جماعي: الصق أرقام + .حظر\n• .ابيض جماعي: الصق أرقام + .ابيض\n• .فك حظر جماعي: الصق أرقام + .فك حظر\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .طرد - رد على رسالة\n• .معلومات\n• .ping';
+            menu += '• .ايدي\n• حظر جماعي: الصق أرقام + كلمة الأمر في الأخير\n• ابيض جماعي: الصق أرقام + كلمة الأمر في الأخير\n• فك حظر جماعي: الصق أرقام + كلمة الأمر في الأخير\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .طرد - رد على رسالة\n• .معلومات\n• .ping';
             await reply(from, menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
@@ -151,25 +149,24 @@ async function startBot() {
           if (lower === '.فتح الروابط') { lockLinks = false; saveLists(); await reply(from, '🔗 فتحت الروابط'); continue; }
           if (lower === '.حذف' && isGroup) {
             if (quotedKey) { await deleteMsg(from, quotedKey); await notifyOwner('✅ تم الحذف في قروب ' + from); }
-            else { await reply(from, '⚠️ رد على الرسالة اللي تبي تحذفها واكتب .حذف'); }
+            else { await reply(from, '⚠️ رد على الرسالة اللي تبي تحذفها'); }
             continue;
           }
           if (lower === '.حذف القوائم' || lower === '.حذف الكل') { whiteList = []; blackList = []; saveLists(); await reply(from, '✅ مسحت البيضاء والبلاك كلهم'); continue; }
           if (lower === '.حذف ابيض') { whiteList = []; saveLists(); await reply(from, '✅ مسحت البيضاء كلها'); continue; }
           if (lower === '.حذف بلاك') { blackList = []; saveLists(); await reply(from, '✅ مسحت البلاك كله'); continue; }
           if (lower.startsWith('.طرد')) {
-            if (!isGroup) { await reply(from, '⚠️ .طرد يخدم في القروب بس'); continue; }
+            if (!isGroup) { await reply(from, '⚠️ الطرد يخدم في القروب بس'); continue; }
             let target = null;
             if (quotedParticipant) target = quotedParticipant;
             else { let nums = extractAllNumbers(text); if (nums.length) target = nums[0] + '@s.whatsapp.net'; }
             if (target) {
               await kickUser(from, target);
               if (!blackList.includes(norm(target))) { blackList.push(norm(target)); saveLists(); }
-              await notifyOwner('🚨 طردت ' + target.split('@')[0] + ' من قروب ' + from + '\nالسبب: أمر منك .طرد');
-            } else { await reply(from, '⚠️ رد على رسالة الشخص واكتب .طرد'); }
+              await notifyOwner('🚨 طردت ' + target.split('@')[0] + ' من قروب ' + from);
+            } else { await reply(from, '⚠️ رد على رسالة الشخص'); }
             continue;
           }
-          // حظر جماعي - يقبل 1 رقم ولا 71 رقم في رسالة وحدة
           if (lower.includes('.حظر') || lower.includes('.اضف بلاك')) {
             let nums = [];
             if (quotedParticipant) nums = [norm(quotedParticipant)];
@@ -179,7 +176,7 @@ async function startBot() {
               for (let n of nums) { if (!blackList.includes(n)) { blackList.push(n); added++; } }
               saveLists();
               await reply(from, '🚫 حظرت ' + nums.length + ' رقم\nتم اضافتهم للبلاك، توا أي واحد منهم يخش أي قروب ينطرد بروحه');
-            } else { await reply(from, '⚠️ اكتب .حظر + رقم، ولا الصق قائمة أرقام + .حظر في الأخير'); }
+            } else { await reply(from, '⚠️ ابعت رقم ولا قائمة أرقام، وحط كلمة الأمر في الأخير'); }
             continue;
           }
           if (lower.includes('.فك حظر') || lower.includes('.الغاء حظر') || lower.includes('.الغاء بلاك')) {
@@ -190,7 +187,7 @@ async function startBot() {
               for (let n of nums) blackList = blackList.filter(x => x !== n);
               saveLists();
               await reply(from, '✅ فكيت الحظر على ' + nums.length + ' رقم');
-            } else { await reply(from, '⚠️ اكتب .فك حظر + رقم'); }
+            } else { await reply(from, '⚠️ ابعت رقم مع أمر فك الحظر'); }
             continue;
           }
           if (lower.includes('.ابيض')) {
