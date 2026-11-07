@@ -49,16 +49,15 @@ async function getGroupName(jid) {
     return groupNameCache[jid];
   } catch(e) { return jid; }
 }
+// --- مصلحة: توا تجيب اسم القروب صح ---
 async function notifyOwner(text) {
   if (!sock) return;
   try {
     let finalText = text;
-    let parts = text.split(' ');
-    for (let p of parts) {
-      if (p.indexOf('@g.us') !== -1) {
-        let name = await getGroupName(p);
-        finalText = finalText.split(p).join('📌 ' + name);
-      }
+    let matches = text.match(/[0-9]+@g\.us/g) || [];
+    for (let jid of matches) {
+      let name = await getGroupName(jid);
+      finalText = finalText.split(jid).join('📌 ' + name);
     }
     await sock.sendMessage(CONTROL_GROUP, { text: finalText });
   } catch(e) {}
@@ -76,6 +75,31 @@ async function kickUser(jid, user) {
 async function deleteMsg(jid, key) {
   try { await sock.sendMessage(jid, { delete: key }); } catch(e) {}
 }
+async function kickBlacklistedFromAllGroups() {
+  if (!sock) return 0;
+  let kicked = 0;
+  try {
+    const groups = await sock.groupFetchAllParticipating();
+    for (let jid in groups) {
+      if (jid === CONTROL_GROUP) continue;
+      try {
+        const meta = groups[jid];
+        let me = null;
+        for (let p of meta.participants) { if (p.id === sock.user.id) me = p; }
+        if (!me || !me.admin) continue;
+        for (let p of meta.participants) {
+          let n = norm(p.id);
+          if (isBlack(n) && !isOwner(n)) {
+            await kickUser(jid, p.id);
+            kicked++;
+            await notifyOwner('🚨 طردت ' + n + ' من قروب ' + jid + '\nالسبب: في البلاك - طرد تلقائي');
+          }
+        }
+      } catch(e) {}
+    }
+  } catch(e) {}
+  return kicked;
+}
 const hasLink = (t) => {
   if (!t) return false;
   let clean = t.toLowerCase().replace(/\s+/g,'').replace(/[:;]/g,':');
@@ -89,7 +113,12 @@ async function startBot() {
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', (u) => {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
-    if (u.connection === 'open') { qrCode = ''; console.log('Bot connected'); notifyOwner('✅ البوت متصل - يخدم في كل القروبات'); }
+    if (u.connection === 'open') {
+      qrCode = ''; console.log('Bot connected');
+      notifyOwner('✅ البوت متصل - يخدم في كل القروبات');
+      setTimeout(() => { kickBlacklistedFromAllGroups(); }, 5000);
+      setInterval(() => { kickBlacklistedFromAllGroups(); }, 60*1000);
+    }
     if (u.connection === 'close') {
       const should = (u.lastDisconnect && u.lastDisconnect.error && u.lastDisconnect.error.output && u.lastDisconnect.error.output.statusCode) !== DisconnectReason.loggedOut;
       if (should) startBot();
@@ -128,8 +157,6 @@ async function startBot() {
         const sender = m.key.participant || m.key.remoteJid;
         const senderNum = norm(sender);
         const text = m.message.conversation || (m.message.extendedTextMessage && m.message.extendedTextMessage.text) || (m.message.imageMessage && m.message.imageMessage.caption) || (m.message.videoMessage && m.message.videoMessage.caption) || '';
-        // FIX: لو الرسالة من البوت نفسه (رد تلقائي) تجاهلها، باش ما يردش على روحه
-        // لكن لو هي أمر منك انت (نفس الرقم) خليه يخدم
         if (m.key.fromMe) {
           let t = text.trim();
           if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0) continue;
@@ -197,7 +224,9 @@ async function startBot() {
             if (nums.length) {
               for (let n of nums) { if (blackList.indexOf(n) === -1) blackList.push(n); }
               saveLists();
-              await reply(from, '🚫 حظرت ' + nums.length + ' رقم\nتم اضافتهم للبلاك، توا أي واحد منهم يخش أي قروب ينطرد بروحه');
+              await reply(from, '🚫 حظرت ' + nums.length + ' رقم\nتوا بنطردهم من كل القروبات اللي انت مشرف فيها');
+              let k = await kickBlacklistedFromAllGroups();
+              if (k > 0) await reply(from, '✅ طردت ' + k + ' واحد منهم كان قاعد جوا القروبات');
             } else { await reply(from, '⚠️ ابعت رقم ولا قائمة أرقام، وحط كلمة الأمر في الأخير'); }
             continue;
           }
