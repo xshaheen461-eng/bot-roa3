@@ -8,11 +8,10 @@ const app = express();
 let lastQR = '';
 
 app.get('/qr', async (req, res) => {
-if (!lastQR) return res.send("مازال ما طلعش QR");
+  if (!lastQR) return res.send('<h1 style="text-align:center">استنى شوية... QR قاعد يتولد</h1><script>setTimeout(()=>location.reload(),5000)</script>');
   try {
     const img = await qrcode.toDataURL(lastQR);
-res.send(<img src="${img}" style="width:300px">);
-
+    res.send(<div style="text-align:center;font-family:sans-serif"><h1>امسح الـ QR</h1><img src="${img}" width="350"><p>يتغير كل دقيقة - الصفحة تتحدث بروحها</p></div><script>setTimeout(()=>location.reload(),30000)</script>);
   } catch(e){ res.send('خطأ في توليد QR'); }
 });
 app.get('/', (req,res)=> res.send('البوت يخدم - افتح /qr باش تربط'));
@@ -106,367 +105,115 @@ const REPORT_TIME = 10*60*1000
 function addReport(groupId, targetJid, reporterJid){
   if(!reports.has(groupId)) reports.set(groupId, new Map())
   let groupReports = reports.get(groupId)
-  if(!groupReports.has(targetJid)) groupReports.set(targetJid, {reporters: new Set(), time: Date.now()})
-  let data = groupReports.get(targetJid)
-  if(Date.now() - data.time > REPORT_TIME){ data.reporters.clear(); data.time = Date.now() }
-  data.reporters.add(reporterJid)
-  let total = reportHistory.get(targetJid) || 0
-  total++
-  reportHistory.set(targetJid, total)
-  saveReportHistory()
-  return data.reporters.size
+  if(!groupReports.has(targetJid)) groupReports.set(targetJid, {count:0, reporters:new Set(), firstTime:Date.now()})
+  let r = groupReports.get(targetJid)
+  if(Date.now() - r.firstTime > REPORT_TIME){ r.count=0; r.reporters.clear(); r.firstTime=Date.now() }
+  if(!r.reporters.has(reporterJid)){ r.reporters.add(reporterJid); r.count++ }
+  return r.count
 }
-setInterval(()=>{ reports.clear() }, 30*60*1000)
 
 async function startBot(){
-try{
-const { state, saveCreds } = await useMultiFileAuthState('./session')
-const sock = makeWASocket({
-  auth: state,
-  logger: P({ level: 'silent' }),
-  browser: Browsers.macOS('Safari'),
-  printQRInTerminal: false,
-  keepAliveIntervalMs: 30000 + Math.random()*10000,
-  markOnlineOnConnect: false,
-  syncFullHistory: false,
-  emitOwnEvents: false,
-  defaultQueryTimeoutMs: 60000,
-  connectTimeoutMs: 60000,
-  retryRequestDelayMs: 3000
-})
-
-// تم حذف كود الربط - توا QR فقط
-sock.ev.on('creds.update', saveCreds)
-sock.ev.on('connection.update', async (u)=>{
-  if(u.qr){
-    lastQR = u.qr;
-    console.log("QR جاهز في /qr - افتح https://bot-roa3.onrender.com/qr");
-  }
-  if(u.connection==='open'){ lastQR=''; console.log("✅ اشتغل | البيضاء: "+whiteList.size+" | البلاك: "+blackList.size) }
-  if(u.connection==='close'){
-    let code=u.lastDisconnect?.error?.output?.statusCode
-    if(code===401) return console.log("جلسة منتهية - امسح session")
-    setTimeout(()=>startBot(),10000 + Math.random()*5000)
-  }
-})
-
-let kickQueue = []
-let lastKickTime = 0
-let kicksInWindow = 0
-let isProcessingQueue = false
-async function safeKick(groupId,jid){
-  return new Promise((resolve)=>{
-    kickQueue.push({groupId, jid, resolve})
-    if(!isProcessingQueue) processQueue()
+  const { state, saveCreds } = await useMultiFileAuthState('./auth')
+  const sock = makeWASocket({
+    auth: state,
+    logger: P({level:'silent'}),
+    browser: Browsers.ubuntu('Chrome'),
+    printQRInTerminal: false,
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false
   })
-}
-async function processQueue(){
-  if(kickQueue.length==0){ isProcessingQueue=false; return }
-  isProcessingQueue=true
-  let now = Date.now()
-  if(now - lastKickTime > 8000){ kicksInWindow=0; lastKickTime=now }
-  if(kicksInWindow >= 1){
-    let wait = 8000 - (now - lastKickTime) + 1000 + Math.random()*1500
-    await delay(wait)
-    kicksInWindow=0
-    lastKickTime=Date.now()
-  }
-  let {groupId, jid, resolve} = kickQueue[0]
-  try{
-    if(!jid||!jid.includes('@') || isWhiteListed(jid) || isOwner(jid)){
-      kickQueue.shift(); resolve(false); return setTimeout(processQueue, 300)
-    }
-    await delay(4000 + Math.random()*2000)
-    await sock.groupParticipantsUpdate(groupId,[jid],'remove')
-    kicksInWindow++; lastKickTime=Date.now()
-    kickQueue.shift(); resolve(true)
-  }catch(e){ kickQueue.shift(); resolve(false) }
-  setTimeout(processQueue, 1200 + Math.random()*800)
-}
+  sock.ev.on('creds.update', saveCreds)
 
-async function secureGroup(groupId){
-  try{
-    await sock.groupRevokeInvite(groupId).catch(()=>{})
-    await delay(1200 + Math.random()*800)
-    await sock.groupSettingUpdate(groupId,'announcement').catch(()=>{})
-  }catch{}
-}
-async function lockDownGroup(groupId,attackers=[]){
-  if(lockedGroups.has(groupId)) return
-  lockedGroups.add(groupId)
-  await secureGroup(groupId)
-  for(let jid of attackers){
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, qr, lastDisconnect } = update
+    if(qr){
+      lastQR = qr
+      console.log('QR جديد تولد - خش على /qr')
+    }
+    if(connection === 'open'){
+      lastQR = ''
+      console.log('تم الربط بنجاح ✅')
+    }
+    if(connection === 'close'){
+      let shouldReconnect = lastDisconnect?.error?.output?.statusCode !== 401
+      if(shouldReconnect){
+        await delay(3000)
+        startBot()
+      } else {
+        console.log('تم تسجيل الخروج - امسح auth واربط من جديد')
+      }
+    }
+  })
+
+  // ====== حماية دخول القروب ======
+  sock.ev.on('group-participants.update', async (anu) => {
     try{
-      if(isWhiteListed(jid)) continue
-      if(isOwner(jid)) continue
-      if(!blackList.has(jid)) blackList.set(jid,{name:"هجوم تبنيد",time:new Date().toLocaleString()})
-      await safeKick(groupId,jid).catch(()=>{})
-    }catch{}
-  }
-  saveBlackList()
-  try{
-    await delay(1500)
-    await sock.sendMessage(groupId,{text:`🚨 تم كشف هجوم تبنيد!\nتم الغاء رابط القروب وقفله 5 دقايق`}).catch(()=>{})
-    setTimeout(async()=>{
-      try{
-        await sock.groupSettingUpdate(groupId,'not_announcement').catch(()=>{})
-        lockedGroups.delete(groupId)
-        joinTracker.delete(groupId)
-        await sock.sendMessage(groupId,{text:`✅ تم فتح القروب برابط جديد`}).catch(()=>{})
-      }catch{}
-    },5*60*1000)
-  }catch{}
-}
-
-setInterval(async ()=>{
-  try{
-    let groups = await sock.groupFetchAllParticipating().catch(()=>null)
-    if(!groups) return
-    for(let id of Object.keys(groups)){
-      try{
-        let reqs = await sock.groupRequestParticipantsList(id).catch(()=>[])
-        if(!reqs || reqs.length==0) continue
-        if(reqs.length >= 8){
-          await lockDownGroup(id, []).catch(()=>{})
-          await sock.sendMessage(id,{text:`🚨 هجوم طلبات انضمام!\n📥 ${reqs.length} طلب\n🔒 تم قفل القروب ورفضهم`}).catch(()=>{})
-        }
-        for(let r of reqs){
-          let jid = r.jid || r.id || r.participant
-          if(!jid) continue
-          if(isBlackListed(jid) || !isAllowedNumber(jid) || reqs.length>=5){
-            await sock.groupRequestParticipantsUpdate(id, [jid], 'reject').catch(()=>{})
-          } else {
-            await sock.groupRequestParticipantsUpdate(id, [jid], 'approve').catch(()=>{})
+      const groupId = anu.id
+      for(let p of anu.participants){
+        if(anu.action === 'add'){
+          if(isOwner(p) || isWhiteListed(p)) continue
+          if(isBlackListed(p)){
+            try{ await sock.groupParticipantsUpdate(groupId, [p], 'remove') }catch{}
+            continue
           }
-          await delay(1500 + Math.random()*800)
+          if(!isAllowedNumber(p)){
+            try{ await sock.groupParticipantsUpdate(groupId, [p], 'remove') }catch{}
+            continue
+          }
+          if(isFloodAttack(groupId)){
+            try{ await sock.groupParticipantsUpdate(groupId, [p], 'remove') }catch{}
+            lockedGroups.add(groupId)
+            continue
+          }
+          if(await hasNoProfilePic(sock, p)){
+            // لو تبي تطرد اللي ماعندهمش صورة، فعّل السطر الجاي
+            // try{ await sock.groupParticipantsUpdate(groupId, [p], 'remove') }catch{}
+          }
         }
-      }catch{}
-    }
-  }catch{}
-}, 60000 + Math.random()*10000)
+      }
+    }catch{}
+  })
 
-sock.ev.on('group-participants.update', async (u)=>{
-try{
-if(u.action == 'add'){
- if(isFloodAttack(u.id)) await lockDownGroup(u.id, u.participants)
- if(!recentJoins.has(u.id)) recentJoins.set(u.id, new Map())
- for(let p of u.participants){
-   try{
-     let pastReports = reportHistory.get(p) || 0
-     if(pastReports == 0){
-       let d = getLastDigits(p)
-       for(let [jid, count] of reportHistory){
-         if(getLastDigits(jid) === d && count >= REPORT_HISTORY_LIMIT){
-           pastReports = count; break
-         }
-       }
-     }
-     if(pastReports >= REPORT_HISTORY_LIMIT){
-       await sock.sendMessage(u.id,{text:`🚨 عضو عليه ${pastReports} بلاغات سابقة\n👤 ${p.split('@')[0]}\n🚫 طرد تلقائي`}).catch(()=>{})
-       await safeKick(u.id, p)
-       continue
-     }
-     recentJoins.get(u.id).set(p, Date.now())
-     if(isWhiteListed(p) || isOwner(p)) continue
-     if(isBlackListed(p)){ await safeKick(u.id, p); continue }
-     if(!isAllowedNumber(p)){ await safeKick(u.id, p); continue }
-     if(lockedGroups.has(u.id)){ await safeKick(u.id, p); continue }
-   }catch{}
- }
-}
-if(u.action == 'remove' || u.action == 'leave'){
-  try{
-    let joins = recentJoins.get(u.id)
-    if(joins){
-      for(let p of u.participants){
-        let joinTime = joins.get(p)
-        if(joinTime && (Date.now() - joinTime < 10000)){
-          blackList.set(p, {name: "دخول/خروج سريع", time: new Date().toLocaleString()})
-          saveBlackList()
+  // ====== رسائل + اوامر ======
+  sock.ev.on('messages.upsert', async ({messages}) => {
+    try{
+      const m = messages[0]
+      if(!m.message || m.key.fromMe) return
+      const from = m.key.remoteJid
+      const isGroup = from.endsWith('@g.us')
+      const sender = m.key.participant || m.key.remoteJid
+      const text = (m.message.conversation || m.message.extendedTextMessage?.text || m.message.imageMessage?.caption || '').trim()
+
+      if(!text) return
+      const lower = text.toLowerCase()
+
+      // حماية روابط
+      if(isGroup && BAD_WORDS.some(w=>lower.includes(w))){
+        if(!isOwner(sender) && !isWhiteListed(sender)){
+          try{ await sock.sendMessage(from, {delete: m.key}) }catch{}
+          return
         }
-        joins.delete(p)
       }
-    }
-  }catch{}
-}
-if(u.action == 'promote' || u.action == 'demote'){
-  try{
-    let botNum = sock.user.id.split(':')[0].split('@')[0]
-    let isBotDemoted = u.participants.some(p => p.includes(botNum))
-    if(u.action == 'demote' && isBotDemoted){
-      if(u.author && !isWhiteListed(u.author) && !isOwner(u.author)){
-        blackList.set(u.author, {name: "سحب اشراف البوت", time: new Date().toLocaleString()})
-        saveBlackList()
-        await delay(2000)
-        await safeKick(u.id, u.author).catch(()=>{})
+
+      // اوامر المالك فقط
+      if(!isOwner(sender)) return
+
+      if(lower === '.قائمة بيضاء' || lower === '.whitelist'){
+        await sock.sendMessage(from, {text: 'القائمة البيضاء: ' + [...whiteList.keys()].join('\n')})
       }
-    }
-  }catch{}
-}
-}catch{}
-})
-
-sock.ev.on('messages.upsert', async ({messages})=>{
-try{
-const m=messages[0]
-if (!m.message) return
-const from=m.key.remoteJid
-const isGroup=from.endsWith('@g.us')
-const text=m.message.conversation||m.message.extendedTextMessage?.text||m.message.imageMessage?.caption||m.message.videoMessage?.caption||""
-const body = text.trim()
-const sender=m.key.participant||from
-const senderAlt = m.key.participantAlt || m.key.senderPn || ""
-const senderPhone = m.key.senderPn || ""
-
-if(m.key.fromMe){
-  if(whiteList.size==0 && body.startsWith('.ابيض')){}
-  else if(body.startsWith('.') || body.startsWith('البيضاء') || body.startsWith('بيضاء') || body.startsWith('.حظر') || body.startsWith('.فك') || body.startsWith('.الغاء') || body.includes('ابلاغ')){}
-  else { return }
-}
-
-let isOwnerSender = isOwner(sender) || isOwner(senderAlt) || isOwner(senderPhone) || m.key.fromMe
-let isSenderWhite = isWhiteListed(sender) || isWhiteListed(senderAlt) || isWhiteListed(senderPhone) || isOwnerSender
-if(!body && !m.message.contactMessage && !m.message.contactsArrayMessage && !m.message.locationMessage) return
-
-let lowerBody = body.toLowerCase()
-
-if((body=='.ابلاغ' || lowerBody=='ابلاغ' || lowerBody=='بلاغ') && isGroup){
-  let ctx = m.message.extendedTextMessage?.contextInfo
-  let target = ctx?.mentionedJid?.[0] || ctx?.participant
-  if(!target){ await sock.sendMessage(from,{text:`❌ رد على رسالة الشخص واكتب .ابلاغ`}).catch(()=>{}); return }
-  if(isWhiteListed(target) || isOwner(target)){ await sock.sendMessage(from,{text:`❌ ما تقدرش تبلغ على مشرف`}).catch(()=>{}); return }
-  if(target === sender){ await sock.sendMessage(from,{text:`❌ ما تبلغش على روحك`}).catch(()=>{}); return }
-  let count = addReport(from, target, sender)
-  let left = REPORT_LIMIT - count
-  if(count >= REPORT_LIMIT){
-    reports.get(from)?.delete(target)
-    await sock.sendMessage(from,{text:`🚨 ${REPORT_LIMIT} بلاغات على ${target.split('@')[0]}\n🚫 سيتم طرده`}).catch(()=>{})
-    blackList.set(target,{name:`${REPORT_LIMIT} بلاغات`,time:new Date().toLocaleString()}); saveBlackList()
-    await safeKick(from, target)
-  } else {
-    await sock.sendMessage(from,{text:`✅ بلاغ ${count}/${REPORT_LIMIT}\n👤 ضد: ${target.split('@')[0]}\n⏳ باقي ${left}`}).catch(()=>{})
-  }
-  return
-}
-
-if(BAN_WORDS.some(w=>lowerBody.includes(w))){
-  if(isOwnerSender){ return }
-  if(isSenderWhite){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); return }
-  else { await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); return }
-}
-
-if(lowerBody.includes('بيضاء') || lowerBody.includes('بيضا')){
-  if(!isOwnerSender){ return }
-  if(whiteList.size==0){ await sock.sendMessage(from,{text:`🤍 البيضاء فاضية`}).catch(()=>{}); return }
-  let msg=`🤍 البيضاء (${whiteList.size}):\n\n`; let i=1
-  for(let [jid,info] of whiteList){ msg+=`${i}. 👤 ${info.name}\n   📞 \`${jid.split('@')[0]}\`\n\n`; i++; if(msg.length>3500){ await sock.sendMessage(from,{text:msg}).catch(()=>{}); msg="" } }
-  if(msg) await sock.sendMessage(from,{text:msg}).catch(()=>{})
-  return
-}
-
-if(lowerBody.includes('بلاك') || lowerBody.includes('قائمة')){
-  if(!isOwnerSender) return
-  if(blackList.size==0){ await sock.sendMessage(from,{text:`🚫 فاضية`}).catch(()=>{}); return }
-  let msg=`🚫 البلاك (${blackList.size}):\n\n`; let i=1
-  for(let [jid,info] of blackList){ msg+=`${i}. 👤 ${info.name}\n   📞 \`${jid.split('@')[0]}\`\n\n`; i++; if(msg.length>3500){ await sock.sendMessage(from,{text:msg}).catch(()=>{}); msg="" } }
-  if(msg) await sock.sendMessage(from,{text:msg}).catch(()=>{})
-  return
-}
-
-if(body.startsWith('.')){
-  if(isOwnerSender){
-    if(body.startsWith('.حذف') || body.startsWith('.خذف')){
-      let q=m.message.extendedTextMessage?.contextInfo
-      if(q?.stanzaId) await sock.sendMessage(from,{delete:{remoteJid:from, fromMe:false, id:q.stanzaId, participant:q.participant}}).catch(()=>{})
-      return
-    }
-    if(body.startsWith('.طرد') && isGroup){
-      let ctx=m.message.extendedTextMessage?.contextInfo
-      let target=ctx?.mentionedJid?.[0]||ctx?.participant
-      if(target){ blackList.set(target,{name:"طرد",time:new Date().toLocaleString()}); saveBlackList(); await safeKick(from,target); }
-      return
-    }
-    if(body.startsWith('.ابيض')){
-      let ctx=m.message.extendedTextMessage?.contextInfo
-      let target=ctx?.mentionedJid?.[0]||ctx?.participant
-      let targetAlt = ctx?.participantAlt || ""
-      let displayName = ctx?.pushName || m.pushName || "مشرف"
-      if(!target){ let raw=body.replace('.ابيض','').trim().replace(/[^0-9]/g,''); if(raw.length>=7) target=(raw.length>15?raw+"@lid":raw+"@s.whatsapp.net") }
-      if(target){ whiteList.set(target,{name:displayName,time:new Date().toLocaleString()}); if(targetAlt) whiteList.set(targetAlt,{name:displayName,time:new Date().toLocaleString()}); saveWhiteList(); await sock.sendMessage(from,{text:`✅ اضيف للبيضاء 🛡️\n👤 ${displayName}`}).catch(()=>{}) }
-      return
-    }
-    if(body.startsWith('.الغاء_ابيض')){
-      let ctx=m.message.extendedTextMessage?.contextInfo
-      let target=ctx?.mentionedJid?.[0]||ctx?.participant
-      if(target){ for(let [w] of whiteList){ if(w===target || getLastDigits(w)===getLastDigits(target)){ whiteList.delete(w); break } } saveWhiteList(); await sock.sendMessage(from,{text:`✅ تم الغاء الحماية`}).catch(()=>{}) }
-      return
-    }
-    if(body.startsWith('.حظر')){
-      let rawText=body.replace('.حظر','')
-      let lines=rawText.split(/[\n ,]+/)
-      let added=0
-      for(let raw of lines){ raw=raw.trim(); if(!raw) continue; let cleanNum=raw.replace(/[^0-9]/g,''); if(cleanNum.length<7) continue; let jid=raw.includes('@')?raw:(cleanNum.length>15?cleanNum+"@lid":cleanNum+"@s.whatsapp.net"); if(isWhiteListed(jid) || isOwner(jid)) continue; if(!isBlackListed(jid)){ blackList.set(jid,{name:`مبند ${cleanNum.slice(-6)}`,time:new Date().toLocaleString()}); added++ } }
-      saveBlackList(); await sock.sendMessage(from,{text:`✅ تم اضافة ${added} للبلاك`}).catch(()=>{}); return
-    }
-    if(body.startsWith('.فك')){
-      let input=body.replace('.فك','').trim().replace(/[^0-9]/g,'')
-      let target=null
-      for(let [jid] of blackList){ if(input&&jid.includes(input.slice(-7))){ target=jid; break } }
-      if(!target){ let ctx=m.message.extendedTextMessage?.contextInfo; target=ctx?.mentionedJid?.[0]||ctx?.participant }
-      let realTarget=target?findBlackMatch(target)||target:null
-      if(realTarget&&blackList.has(realTarget)){ blackList.delete(realTarget); saveBlackList(); await sock.sendMessage(from,{text:`✅ تم فك الحظر`}).catch(()=>{}) }
-      return
-    }
-    if(body.includes('قفل')){ await lockDownGroup(from,[]); return }
-    if(body.includes('فتح')){ try{ await sock.groupSettingUpdate(from,'not_announcement'); lockedGroups.delete(from); joinTracker.delete(from); await sock.sendMessage(from,{text:`✅ فتح`}).catch(()=>{}) }catch{}; return }
-    return
-  }
-  if(isSenderWhite){
-    if(body.startsWith('.حذف') || body.startsWith('.خذف') || body.startsWith('.طرد')){
-      if(body.startsWith('.حذف') || body.startsWith('.خذف')){ let q=m.message.extendedTextMessage?.contextInfo; if(q?.stanzaId) await sock.sendMessage(from,{delete:{remoteJid:from, fromMe:false, id:q.stanzaId, participant:q.participant}}).catch(()=>{}) }
-      if(body.startsWith('.طرد') && isGroup){ let ctx=m.message.extendedTextMessage?.contextInfo; let target=ctx?.mentionedJid?.[0]||ctx?.participant; if(target){ if(isWhiteListed(target) || isOwner(target)) return; blackList.set(target,{name:"طرد",time:new Date().toLocaleString()}); saveBlackList(); await safeKick(from,target); } }
-      return
-    }
-    if(isGroup){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); }
-    return
-  }
-  if(isGroup){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); }
-  return
-}
-
-if(isSenderWhite) return
-
-if(isGroup){
-  try{
-    let lower=text.toLowerCase()
-    let ctxInfo = m.message.extendedTextMessage?.contextInfo || {}
-
-    if(body.trim().toUpperCase().startsWith('3EB0')){
-      if(isWhiteListed(sender) || isOwner(sender)) return
-      await sock.sendMessage(from,{delete:m.key}).catch(()=>{})
-      await safeKick(from,sender).catch(()=>{})
-      blackList.set(sender,{name:`مفتاح بوت 3EB0: ${body.slice(0,25)}`,time:new Date().toLocaleString()}); saveBlackList()
-      await sock.sendMessage(from,{text:`🚫 طرد بوت تبنيد\n👤 @${sender.split('@')[0]}\n📌 السبب: مفتاح 3EB0`, mentions:[sender]}).catch(()=>{})
-      return
-    }
-
-    if(m.message.contactMessage||m.message.contactsArrayMessage){
-      await sock.sendMessage(from,{delete:m.key}).catch(()=>{})
-      await safeKick(from,sender).catch(()=>{})
-      blackList.set(sender,{name:"جهة اتصال مشبوهة",time:new Date().toLocaleString()}); saveBlackList()
-      return
-    }
-
-    if(BAD_WORDS.some(w=>lower.includes(w))){
-      await sock.sendMessage(from,{delete:m.key}).catch(()=>{})
-      return
-    }
-
-  }catch{}
-}
-}catch{}
-})
-
-}catch(e){ console.log("خطأ بدء:", e.message); setTimeout(()=>startBot(), 15000) }
+      if(text.startsWith('.اضافة')){
+        let num = text.replace(/\D/g,'')
+        if(num){ let jid = num + '@s.whatsapp.net'; whiteList.set(jid,{name:num,time:new Date().toISOString()}); saveWhiteList(); await sock.sendMessage(from,{text:'تمت الاضافة ✅'}) }
+      }
+      if(text.startsWith('.حظر')){
+        let num = text.replace(/\D/g,'')
+        if(num){ let jid = num + '@s.whatsapp.net'; blackList.set(jid,{time:Date.now()}); saveBlackList(); await sock.sendMessage(from,{text:'تم الحظر ✅'}) }
+      }
+      if(lower === '.ping'){
+        await sock.sendMessage(from,{text:'البوت شغال ✅'})
+      }
+    }catch{}
+  })
 }
 startBot()
