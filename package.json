@@ -1,15 +1,12 @@
 {
-  "name": "bot-roa3",
+  "name": "bot",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
+  "scripts": { "start": "node index.js" },
   "dependencies": {
     "@whiskeysockets/baileys": "latest",
-    "dotenv": "latest",
     "express": "latest",
-    "qrcode": "latest",
-    "pino": "latest"
+    "pino": "latest",
+    "qrcode": "latest"
   }
 }
