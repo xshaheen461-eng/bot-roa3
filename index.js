@@ -8,10 +8,11 @@ const app = express();
 let lastQR = '';
 
 app.get('/qr', async (req, res) => {
-  if (!lastQR) return res.send('<h1 style="text-align:center">استنى شوية... QR قاعد يتولد</h1><script>setTimeout(()=>location.reload(),5000)</script>');
+if (!lastQR) return res.send("مازال ما طلعش QR");
   try {
     const img = await qrcode.toDataURL(lastQR);
-    res.send(<div style="text-align:center;font-family:sans-serif"><h1>امسح الـ QR</h1><img src="${img}" width="350"><p>يتغير كل دقيقة - الصفحة تتحدث بروحها</p></div><script>setTimeout(()=>location.reload(),30000)</script>);
+res.send(<img src="${img}" style="width:300px">);
+
   } catch(e){ res.send('خطأ في توليد QR'); }
 });
 app.get('/', (req,res)=> res.send('البوت يخدم - افتح /qr باش تربط'));
