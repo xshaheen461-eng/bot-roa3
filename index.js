@@ -39,10 +39,32 @@ let linkCount = {};
 let stickerCount = {};
 let floodCount = {};
 let joinTimes = {};
+
+// --- جديد: يجيب اسم القروب بدل الـ ID ---
+let groupNameCache = {};
+async function getGroupName(jid) {
+  if (!jid || !jid.endsWith('@g.us')) return jid;
+  if (groupNameCache[jid]) return groupNameCache[jid];
+  try {
+    const meta = await sock.groupMetadata(jid);
+    groupNameCache[jid] = meta.subject || jid;
+    return groupNameCache[jid];
+  } catch { return jid; }
+}
 async function notifyOwner(text) {
   if (!sock) return;
-  try { await sock.sendMessage(CONTROL_GROUP, { text }); } catch {}
+  try {
+    // يدور على أي ID قروب في الرسالة ويبدله باسمه
+    let finalText = text;
+    let ids = text.match(/\d+@g\.us/g) || [];
+    for (let id of ids) {
+      let name = await getGroupName(id);
+      finalText = finalText.replaceAll(id, '📌 ' + name);
+    }
+    await sock.sendMessage(CONTROL_GROUP, { text: finalText });
+  } catch {}
 }
+
 async function reply(jid, text) {
   try { await sock.sendMessage(jid, { text }); } catch {}
 }
@@ -102,13 +124,11 @@ async function startBot() {
     for (const m of messages) {
       try {
         if (!m.message) continue;
-        // FIX 1: تجاهل رسائل البوت نفسه - هذا اللي كان يدير في اللوب
         if (m.key.fromMe) continue;
         const from = m.key.remoteJid;
         const isGroup = from?.endsWith('@g.us');
         const sender = m.key.participant || m.key.remoteJid;
         const senderNum = norm(sender);
-        // FIX 2: لو الرسالة من رقم البوت نفسه تجاهلها
         if (sock && sender === sock.user?.id) continue;
         const isOwnerSender = isOwner(senderNum) || sender === OWNER_NUMBER + '@s.whatsapp.net';
         const isWhiteSender = isWhite(senderNum);
@@ -172,8 +192,7 @@ async function startBot() {
             if (quotedParticipant) nums = [norm(quotedParticipant)];
             else nums = extractAllNumbers(text);
             if (nums.length) {
-              let added = 0;
-              for (let n of nums) { if (!blackList.includes(n)) { blackList.push(n); added++; } }
+              for (let n of nums) { if (!blackList.includes(n)) blackList.push(n); }
               saveLists();
               await reply(from, '🚫 حظرت ' + nums.length + ' رقم\nتم اضافتهم للبلاك، توا أي واحد منهم يخش أي قروب ينطرد بروحه');
             } else { await reply(from, '⚠️ ابعت رقم ولا قائمة أرقام، وحط كلمة الأمر في الأخير'); }
@@ -273,5 +292,4 @@ app.get('/qr', async (req, res) => {
   const img = await qrcode.toDataURL(qrCode);
   res.send('<img src="' + img + '"><h2>Scan QR</h2>');
 });
-app.listen(process.env.PORT || 10000);
-startBot();
+app.listen(process.env.PORT || 100
