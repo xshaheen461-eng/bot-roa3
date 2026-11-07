@@ -123,16 +123,20 @@ async function startBot() {
     for (const m of messages) {
       try {
         if (!m.message) continue;
-        if (m.key.fromMe) continue;
         const from = m.key.remoteJid;
         const isGroup = from && from.endsWith('@g.us');
         const sender = m.key.participant || m.key.remoteJid;
         const senderNum = norm(sender);
-        if (sock && sock.user && sender === sock.user.id) continue;
-        const isOwnerSender = isOwner(senderNum) || sender === OWNER_NUMBER + '@s.whatsapp.net';
+        const text = m.message.conversation || (m.message.extendedTextMessage && m.message.extendedTextMessage.text) || (m.message.imageMessage && m.message.imageMessage.caption) || (m.message.videoMessage && m.message.videoMessage.caption) || '';
+        // FIX: لو الرسالة من البوت نفسه (رد تلقائي) تجاهلها، باش ما يردش على روحه
+        // لكن لو هي أمر منك انت (نفس الرقم) خليه يخدم
+        if (m.key.fromMe) {
+          let t = text.trim();
+          if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0) continue;
+        }
+        const isOwnerSender = isOwner(senderNum) || m.key.fromMe || sender === OWNER_NUMBER + '@s.whatsapp.net';
         const isWhiteSender = isWhite(senderNum);
         const isBlackSender = isBlack(senderNum);
-        const text = m.message.conversation || (m.message.extendedTextMessage && m.message.extendedTextMessage.text) || (m.message.imageMessage && m.message.imageMessage.caption) || (m.message.videoMessage && m.message.videoMessage.caption) || '';
         const lower = text.toLowerCase().trim().replace(/_/g,' ');
         const isForward = (m.message.extendedTextMessage && m.message.extendedTextMessage.contextInfo && m.message.extendedTextMessage.contextInfo.isForwarded) || (m.message.imageMessage && m.message.imageMessage.contextInfo && m.message.imageMessage.contextInfo.isForwarded) || (m.message.videoMessage && m.message.videoMessage.contextInfo && m.message.videoMessage.contextInfo.isForwarded);
         const isSticker = !!m.message.stickerMessage;
