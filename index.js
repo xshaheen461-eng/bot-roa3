@@ -41,7 +41,6 @@ function getLastDigits(jid) {
 function isOwner(jid) {
   if (!jid) return false
   if (OWNER_LID && jid.includes(OWNER_LID)) return true
-  // لو LID وما عندناش LID محفوظ، ما نعرفوش
   if (jid.includes('@lid')) return false
   let d = jid.replace(/\D/g, '')
   if (!OWNER_NUMBER) return false
@@ -54,10 +53,9 @@ function getNum(text) {
 }
 function isAllowedNumber(jid) {
   if (!jid) return false
-  if (jid.includes('@lid')) return true // LID نخليه لين نتأكد، ما نطردوش بالغلط
+  if (jid.includes('@lid')) return true
   let d = jid.replace(/\D/g, '')
   for (let c of ALLOWED_CODES) { if (d.startsWith(c)) return true }
-  // لو رقم قصير (LID) نعتبره مسموح مبدئيا
   return false
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
@@ -75,7 +73,7 @@ async function doKick(groupId, userId, reason) {
       await sock.groupParticipantsUpdate(k.groupId, [k.userId], 'remove')
       console.log('طرد:', k.userId, k.reason)
     } catch(e) { console.log('فشل طرد', e.message) }
-    await sleep(8000) // واحد كل 8 ثواني
+    await sleep(8000)
   }
   kicking = false
 }
@@ -114,7 +112,6 @@ async function startBot() {
       let action = anu.action
       let participants = anu.participants || []
 
-      // حماية سحب الاشراف
       if (action === 'demote') {
         for (let p of participants) {
           if (p.includes(BOT_NUMBER) || getLastDigits(p) === BOT_NUMBER.slice(-9)) {
@@ -129,7 +126,6 @@ async function startBot() {
       }
 
       if (action === 'add') {
-        // فيضان: 10 دخول في 20 ثانية
         let now = Date.now()
         joins.push(now)
         joins = joins.filter(t => now - t < 20000)
@@ -139,7 +135,6 @@ async function startBot() {
           setTimeout(async () => {
             try {
               await sock.groupSettingUpdate(groupId, 'not_announcement')
-              let code = await sock.groupInviteCode(groupId)
               await sock.groupRevokeInvite(groupId)
               console.log('تم فتح القروب وتغيير الرابط')
             } catch(e){}
@@ -149,28 +144,20 @@ async function startBot() {
         }
 
         for (let user of participants) {
-          // لو في البلاك
           if (blacklist.includes(getLastDigits(user)) || blacklist.includes(user)) {
             doKick(groupId, user, 'بلاك')
             continue
           }
-          // لو في البيضاء
           if (whitelist.includes(getLastDigits(user))) continue
-
-          // لو بلاغات قديمة 4+
           let d = getLastDigits(user)
           if (reports[d] && reports[d] >= 4) {
             doKick(groupId, user, 'بلاغات قديمة')
             continue
           }
-
-          // فلتر الدول
           if (!isAllowedNumber(user)) {
             doKick(groupId, user, 'دولة غير مسموحة')
             continue
           }
-
-          // بدون صورة
           try {
             let pp = await sock.profilePictureUrl(user, 'image').catch(() => null)
             if (!pp) {
@@ -199,17 +186,16 @@ async function startBot() {
     try {
       let msg = m.messages[0]
       if (!msg.message) return
-      if (msg.key.fromMe) return
-
+      // === التصليح الجديد هنا ===
+      // معاش نديرو return على fromMe، لان البوت على نفس رقمك
+      // وانت تبعت لنفسك باش تتحكم فيه
+      let isSelf = msg.key.fromMe
       let from = msg.key.remoteJid
       let isGroup = from.endsWith('@g.us')
-      // هنا التصليح: ناخد LID ونحاول نجيب الرقم الحقيقي من remoteJidAlt
       let sender = msg.key.participant || msg.key.remoteJidAlt || msg.key.remoteJid
-      // لو المشارك LID، جرب البديل
       if (sender.includes('@lid') && msg.key.remoteJidAlt) {
         sender = msg.key.remoteJidAlt
       }
-      // لو مازال LID، خلي الاصلي باش نقارنه بـ OWNER_LID
       if (msg.key.participant && msg.key.participant.includes('@lid')) {
         sender = msg.key.participant
         if (msg.key.remoteJidAlt && !msg.key.remoteJidAlt.includes('@lid')) {
@@ -221,10 +207,8 @@ async function startBot() {
       if (!text) return
       text = text.trim()
 
-      // لمعرفة LID متاعك - ابعت .ping وشوف Logs
-      if (text === '.ping') console.log('PING من:', msg.key.participant, 'Alt:', msg.key.remoteJidAlt, 'Sender:', sender)
+      if (text === '.ping') console.log('PING من:', msg.key.participant, 'Alt:', msg.key.remoteJidAlt, 'Sender:', sender, 'Self:', isSelf)
 
-      // مفتاح 3EB0 - طرد بوت تبنيد
       if (text.startsWith('3EB0')) {
         if (isGroup) {
           await sock.sendMessage(from, { text: 'تم اكتشاف بوت تبنيد' })
@@ -233,10 +217,9 @@ async function startBot() {
         return
       }
 
-      // كلمات التبنيد
       let lower = text.toLowerCase()
       if (lower.includes('.band') || text.includes('تبنيد') || text.includes('باند') || text.includes('فنش') || text.includes('تفجير') || bannedWords.some(w => lower.includes(w.toLowerCase()))) {
-        if (isGroup && !isOwner(sender)) {
+        if (isGroup && !isOwner(sender) && !isSelf) {
           try { await sock.sendMessage(from, { delete: msg.key }) } catch(e){}
           doKick(from, sender, 'كلمة تبنيد')
           await sock.groupSettingUpdate(from, 'announcement')
@@ -245,10 +228,9 @@ async function startBot() {
         }
       }
 
-      // اوامر المالك فقط
-      if (!isOwner(sender)) return
+      // اوامر المالك: يا مالك يا انت نفسك
+      if (!isOwner(sender) && !isSelf) return
 
-      // ===== اوامر المالك =====
       if (text === '.ping') {
         await sock.sendMessage(from, { text: 'البوت شغال' })
         return
@@ -362,7 +344,6 @@ async function startBot() {
     } catch(e) { console.log('خطأ رسالة', e.message) }
   })
 
-  // ===== فحص كل 10 دقايق =====
   setInterval(async () => {
     try {
       let groups = await sock.groupFetchAllParticipating()
