@@ -1,5 +1,22 @@
-// ====== بوت حماية V2 - نسخة آمنة ضد البند ======
+// ====== بوت حماية V2 - نسخة QR + آمنة ضد البند ======
 require('dotenv').config()
+
+// ====== سيرفر QR ======
+const express = require('express');
+const qrcode = require('qrcode');
+const app = express();
+let lastQR = '';
+
+app.get('/qr', async (req, res) => {
+  if (!lastQR) return res.send('<h1 style="text-align:center">استنى شوية... QR قاعد يتولد</h1><script>setTimeout(()=>location.reload(),5000)</script>');
+  try {
+    const img = await qrcode.toDataURL(lastQR);
+    res.send(<div style="text-align:center;font-family:sans-serif"><h1>امسح الـ QR</h1><img src="${img}" width="350"><p>يتغير كل دقيقة - الصفحة تتحدث بروحها</p></div><script>setTimeout(()=>location.reload(),30000)</script>);
+  } catch(e){ res.send('خطأ في توليد QR'); }
+});
+app.get('/', (req,res)=> res.send('البوت يخدم - افتح /qr باش تربط'));
+app.listen(process.env.PORT || 10000, ()=> console.log('سيرفر QR يخدم'));
+
 let _log = console.log
 console.log = (...a) => {
   let s = (a[0]||'').toString()
@@ -117,16 +134,14 @@ const sock = makeWASocket({
   retryRequestDelayMs: 3000
 })
 
-if (!sock.authState.creds.registered){
-  await delay(3000)
-  try{
-    if(!BOT_NUMBER) return console.log("حط BOT_NUMBER في .env")
-    let code=await sock.requestPairingCode(BOT_NUMBER); console.log("كود الربط: "+code)
-  }catch(e){ console.log("فشل:", e.message) }
-}
+// تم حذف كود الربط - توا QR فقط
 sock.ev.on('creds.update', saveCreds)
 sock.ev.on('connection.update', async (u)=>{
-  if(u.connection==='open'){ console.log("✅ اشتغل | البيضاء: "+whiteList.size+" | البلاك: "+blackList.size) }
+  if(u.qr){
+    lastQR = u.qr;
+    console.log("QR جاهز في /qr - افتح https://bot-roa3.onrender.com/qr");
+  }
+  if(u.connection==='open'){ lastQR=''; console.log("✅ اشتغل | البيضاء: "+whiteList.size+" | البلاك: "+blackList.size) }
   if(u.connection==='close'){
     let code=u.lastDisconnect?.error?.output?.statusCode
     if(code===401) return console.log("جلسة منتهية - امسح session")
@@ -255,9 +270,6 @@ if(u.action == 'add'){
      if(isBlackListed(p)){ await safeKick(u.id, p); continue }
      if(!isAllowedNumber(p)){ await safeKick(u.id, p); continue }
      if(lockedGroups.has(u.id)){ await safeKick(u.id, p); continue }
-     // تم ايقاف طرد بدون صورة - يسبب بند
-     // let noPic = await hasNoProfilePic(sock, p)
-     // if(noPic){ await safeKick(u.id, p); blackList.set(p, {name: "بدون صورة", time: new Date().toLocaleString()}); saveBlackList() }
    }catch{}
  }
 }
@@ -268,7 +280,6 @@ if(u.action == 'remove' || u.action == 'leave'){
       for(let p of u.participants){
         let joinTime = joins.get(p)
         if(joinTime && (Date.now() - joinTime < 10000)){
-          // معاش نقفل القروب على دخول/خروج - بس نسجل
           blackList.set(p, {name: "دخول/خروج سريع", time: new Date().toLocaleString()})
           saveBlackList()
         }
@@ -337,7 +348,6 @@ if((body=='.ابلاغ' || lowerBody=='ابلاغ' || lowerBody=='بلاغ') && 
   return
 }
 
-// تعديل: كلمة تبنيد = مسح فقط، بدون طرد وبدون قفل - يقلل البند
 if(BAN_WORDS.some(w=>lowerBody.includes(w))){
   if(isOwnerSender){ return }
   if(isSenderWhite){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); return }
@@ -419,7 +429,6 @@ if(body.startsWith('.')){
     if(isGroup){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); }
     return
   }
-  // عضو عادي يكتب نقطة - مسح فقط، بدون قفل القروب
   if(isGroup){ await sock.sendMessage(from,{delete:m.key}).catch(()=>{}); }
   return
 }
@@ -441,7 +450,6 @@ if(isGroup){
     }
 
     if(m.message.contactMessage||m.message.contactsArrayMessage){
-      // تعديل: جهة اتصال = مسح + طرد فقط، بدون قفل القروب
       await sock.sendMessage(from,{delete:m.key}).catch(()=>{})
       await safeKick(from,sender).catch(()=>{})
       blackList.set(sender,{name:"جهة اتصال مشبوهة",time:new Date().toLocaleString()}); saveBlackList()
