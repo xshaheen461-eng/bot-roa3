@@ -99,6 +99,9 @@ async function startBot() {
           if (lower === '.بيضاء') { await notifyOwner('🤍 البيضاء:\n' + (whiteList.length ? whiteList.join('\n') : 'فاضية')); continue; }
           if (lower === '.بلاك') { await notifyOwner('🚫 البلاك:\n' + (blackList.length ? blackList.join('\n') : 'فاضي')); continue; }
           if (lower === '.قائمة') { await notifyOwner('🤍 بيضاء: ' + whiteList.length + '\n🚫 بلاك: ' + blackList.length); continue; }
+          if (lower === '.فتح') { try { await sock.groupSettingUpdate(from, 'not_announcement'); await notifyOwner('✅ فتحت القروب'); } catch {} continue; }
+          if (lower === '.سكر' || lower === '.قفل') { try { await sock.groupSettingUpdate(from, 'announcement'); await notifyOwner('🔒 سكرت القروب'); } catch {} continue; }
+          if (lower === '.حذف') { whiteList = []; blackList = []; saveLists(); await notifyOwner('✅ مسحت البيضاء والبلاك كلهم'); continue; }
           if (lower.startsWith('.ابيض')) { let n = norm(text); if (n) { if (!whiteList.includes(n)) whiteList.push(n); saveLists(); await notifyOwner('✅ ضفته للبيضاء: ' + n); } continue; }
           if (lower.startsWith('.الغاء ابيض')) { let n = norm(text); whiteList = whiteList.filter(x => x !== n); saveLists(); await notifyOwner('✅ نحيته من البيضاء: ' + n); continue; }
           if (lower.startsWith('.اضف بلاك')) { let n = norm(text); if (n) { if (!blackList.includes(n)) blackList.push(n); saveLists(); await notifyOwner('✅ ضفته للبلاك: ' + n); } continue; }
