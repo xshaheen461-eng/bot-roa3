@@ -1,4 +1,3 @@
-
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys')
 const pino = require('pino')
 const express = require('express')
@@ -43,19 +42,20 @@ function isOwner(jid) {
   if (!OWNER_NUMBER) return false
   return d.includes(OWNER_NUMBER) || d.endsWith(OWNER_NUMBER.slice(-9))
 }
-// ===== جديد: يطلع كل الارقام من الرسالة =====
 function getNums(text) {
   if (!text) return []
-  // يطلع اي مجموعة ارقام من 9 ل 15 رقم
-  let matches = text.match(/\d{9,15}/g) || []
-  // ناخد اخر 9 ارقام من كل رقم، ونحيد التكرار
-  let out = [...new Set(matches.map(n => n.slice(-9)))]
-  // نحيد الارقام اللي هي اوامر او قصيرة
-  return out.filter(n => n.length === 9)
+  let matches = text.match(/\d{8,15}/g) || []
+  // نخزن الرقم كامل كيف ما بعته انت، مش اخر 9 بس، باش يطلع في القائمة كامل
+  let out = [...new Set(matches)]
+  return out.filter(n => n.length >= 😎
 }
 function getNum(text) {
   let all = getNums(text)
   return all[0] || ''
+}
+function isInList(list, jid) {
+  let last = getLastDigits(jid)
+  return list.some(x => x.slice(-9) === last || last.endsWith(x.slice(-9)) || x.endsWith(last))
 }
 function isAllowedNumber(jid) {
   if (!jid) return false
@@ -65,6 +65,24 @@ function isAllowedNumber(jid) {
   return false
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+// ===== تنسيق القوائم الجديد - كيف ما تبي انت =====
+function formatBlacklist() {
+  if (blacklist.length === 0) return '🚫 البلاك (0):\nفاضية'
+  let txt = '🚫 البلاك (' + blacklist.length + '):\n\n'
+  blacklist.forEach((n, i) => {
+    txt += (i+1) + '. 👤 مبند ' + n.slice(-6) + '\n   📞 `' + n + '`\n\n'
+  })
+  return txt.trim()
+}
+function formatWhitelist() {
+  if (whitelist.length === 0) return '✅ البيضاء (0):\nفاضية'
+  let txt = '✅ البيضاء (' + whitelist.length + '):\n\n'
+  whitelist.forEach((n, i) => {
+    txt += (i+1) + '. 👤 مسموح ' + n.slice(-6) + '\n   📞 `' + n + '`\n\n'
+  })
+  return txt.trim()
+}
 
 let kickQueue = []
 let kicking = false
@@ -118,9 +136,7 @@ async function startBot() {
         for (let p of participants) {
           if (p.includes(BOT_NUMBER) || getLastDigits(p) === BOT_NUMBER.slice(-9)) {
             let actor = anu.author || ''
-            if (!isOwner(actor)) {
-              await sock.groupParticipantsUpdate(groupId, [actor], 'remove')
-            }
+            if (!isOwner(actor)) await sock.groupParticipantsUpdate(groupId, [actor], 'remove')
           }
         }
         return
@@ -133,35 +149,20 @@ async function startBot() {
           await sock.sendMessage(groupId, { text: 'تم اكتشاف فيضان، القروب تقفل 5 دقايق' })
           await sock.groupSettingUpdate(groupId, 'announcement')
           setTimeout(async () => {
-            try {
-              await sock.groupSettingUpdate(groupId, 'not_announcement')
-              await sock.groupRevokeInvite(groupId)
-            } catch(e){}
+            try { await sock.groupSettingUpdate(groupId, 'not_announcement'); await sock.groupRevokeInvite(groupId) } catch(e){}
           }, 5 * 60 * 1000)
           joins = []
           return
         }
         for (let user of participants) {
-          if (blacklist.includes(getLastDigits(user)) || blacklist.includes(user)) {
-            doKick(groupId, user, 'بلاك')
-            continue
-          }
-          if (whitelist.includes(getLastDigits(user))) continue
+          if (isInList(blacklist, user)) { doKick(groupId, user, 'بلاك'); continue }
+          if (isInList(whitelist, user)) continue
           let d = getLastDigits(user)
-          if (reports[d] && reports[d] >= 4) {
-            doKick(groupId, user, 'بلاغات قديمة')
-            continue
-          }
-          if (!isAllowedNumber(user)) {
-            doKick(groupId, user, 'دولة غير مسموحة')
-            continue
-          }
+          if (reports[d] && reports[d] >= 4) { doKick(groupId, user, 'بلاغات قديمة'); continue }
+          if (!isAllowedNumber(user)) { doKick(groupId, user, 'دولة غير مسموحة'); continue }
           try {
             let pp = await sock.profilePictureUrl(user, 'image').catch(() => null)
-            if (!pp) {
-              doKick(groupId, user, 'بدون صورة')
-              continue
-            }
+            if (!pp) { doKick(groupId, user, 'بدون صورة'); continue }
           } catch(e){}
           await sleep(4000)
         }
@@ -191,19 +192,14 @@ async function startBot() {
         sender = msg.key.participant
         if (msg.key.remoteJidAlt && !msg.key.remoteJidAlt.includes('@lid')) sender = msg.key.remoteJidAlt
       }
-
       let text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || ''
       if (!text) return
       text = text.trim()
-
-      // لو رديت على رسالة فيها ارقام، خود الارقام من الرسالة الاصلية
       let quotedText = msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.conversation || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text || ''
       if (quotedText && (text.includes('.ابيض') || text.includes('.حظر') || text.includes('.حضر') || text.includes('.فك'))) {
         text = quotedText + '\n' + text
       }
-
       if (text === '.ping') console.log('PING من:', sender, 'Self:', isSelf)
-
       if (text.startsWith('3EB0')) {
         if (isGroup) {
           await sock.sendMessage(from, { text: 'تم اكتشاف بوت تبنيد' })
@@ -211,7 +207,6 @@ async function startBot() {
         }
         return
       }
-
       let lower = text.toLowerCase()
       if (lower.includes('.band') || text.includes('تبنيد') || text.includes('باند') || text.includes('فنش') || text.includes('تفجير') || bannedWords.some(w => lower.includes(w.toLowerCase()))) {
         if (isGroup && !isOwner(sender) && !isSelf) {
@@ -222,14 +217,11 @@ async function startBot() {
           return
         }
       }
-
       if (!isOwner(sender) && !isSelf) return
-
       if (text === '.ping') {
         await sock.sendMessage(from, { text: 'البوت شغال' })
         return
       }
-
       if (text.startsWith('.طرد')) {
         if (!isGroup) return
         let nums = getNums(text)
@@ -237,7 +229,6 @@ async function startBot() {
         if (nums.length > 0) await sock.sendMessage(from, { text: 'تم طرد ' + nums.length + ' عضو' })
         return
       }
-
       if (text.startsWith('.حذف')) {
         if (!isGroup) return
         let quoted = msg.message.extendedTextMessage?.contextInfo?.stanzaId
@@ -247,31 +238,27 @@ async function startBot() {
         }
         return
       }
-
       if (text === '.قفل') {
         if (!isGroup) return
         await sock.groupSettingUpdate(from, 'announcement')
         await sock.sendMessage(from, { text: 'تم قفل القروب' })
         return
       }
-
       if (text === '.فتح') {
         if (!isGroup) return
         await sock.groupSettingUpdate(from, 'not_announcement')
         await sock.sendMessage(from, { text: 'تم فتح القروب' })
         return
       }
-
       // ===== حظر جماعي =====
       if (text.includes('.حظر') || text.includes('.حضر')) {
         let nums = getNums(text)
         if (nums.length > 0) {
           let added = 0
-          for (let last of nums) {
-            if (!blacklist.includes(last)) { blacklist.push(last); added++ }
-            // لو كان في البيضاء نحيه منها
-            whitelist = whitelist.filter(x => x !== last)
-            if (isGroup) doKick(from, last + '@s.whatsapp.net', 'حظر جماعي')
+          for (let full of nums) {
+            if (!blacklist.some(x => x.slice(-9) === full.slice(-9))) { blacklist.push(full); added++ }
+            whitelist = whitelist.filter(x => x.slice(-9) !== full.slice(-9))
+            if (isGroup) doKick(from, full + '@s.whatsapp.net', 'حظر جماعي')
           }
           save('blacklist.json', blacklist)
           save('whitelist.json', whitelist)
@@ -281,32 +268,29 @@ async function startBot() {
         }
         return
       }
-
-      // ===== فك حظر جماعي =====
+      // ===== فك جماعي =====
       if (text.includes('.فك')) {
         let nums = getNums(text)
         if (nums.length > 0) {
-          for (let last of nums) blacklist = blacklist.filter(x => x !== last)
+          for (let full of nums) blacklist = blacklist.filter(x => x.slice(-9) !== full.slice(-9))
           save('blacklist.json', blacklist)
           await sock.sendMessage(from, { text: 'تم فك ' + nums.length + ' رقم' })
         }
         return
       }
-
       // ===== بيضاء جماعي =====
       if (text.includes('.ابيض') || text.includes('.الغاء_ابيض')) {
         let nums = getNums(text)
         if (nums.length > 0) {
           if (text.includes('.الغاء_ابيض')) {
-            for (let last of nums) whitelist = whitelist.filter(x => x !== last)
+            for (let full of nums) whitelist = whitelist.filter(x => x.slice(-9) !== full.slice(-9))
             save('whitelist.json', whitelist)
             await sock.sendMessage(from, { text: 'تم الغاء ' + nums.length + ' من البيضاء' })
           } else {
             let added = 0
-            for (let last of nums) {
-              if (!whitelist.includes(last)) { whitelist.push(last); added++ }
-              // لو كان في البلاك نحيه
-              blacklist = blacklist.filter(x => x !== last)
+            for (let full of nums) {
+              if (!whitelist.some(x => x.slice(-9) === full.slice(-9))) { whitelist.push(full); added++ }
+              blacklist = blacklist.filter(x => x.slice(-9) !== full.slice(-9))
             }
             save('whitelist.json', whitelist)
             save('blacklist.json', blacklist)
@@ -317,34 +301,34 @@ async function startBot() {
         }
         return
       }
-
-      // ===== القائمة الكاملة =====
+      // ===== القائمة - بالشكل الجديد =====
       if (text === '.قائمة' || text === '.قائمه' || text === '.list' || text === '.بيضاء' || text === 'بيضاء') {
-        let white = whitelist.length > 0 ? whitelist.join(', ') : 'فاضية'
-        let black = blacklist.length > 0 ? blacklist.join(', ') : 'فاضية'
         let banned = bannedWords.length > 0 ? bannedWords.join(', ') : 'فاضية'
         let rep = Object.keys(reports).length > 0 ? Object.entries(reports).map(([k,v]) => k + ' (' + v + ')').join(', ') : 'فاضية'
-        await sock.sendMessage(from, { text: '📋 *القوائم*\n\n✅ *بيضاء:*\n' + white + '\n\n⛔ *بلاك:*\n' + black + '\n\n🚫 *كلمات تبنيد:*\n' + banned + '\n\n⚠️ *بلاغات:*\n' + rep })
+        let out = formatWhitelist() + '\n\n' + formatBlacklist() + '\n\n🚫 *كلمات تبنيد:*\n' + banned + '\n\n⚠️ *بلاغات:*\n' + rep
+        await sock.sendMessage(from, { text: out })
         return
       }
-
-      if (text === 'بلاك') {
-        await sock.sendMessage(from, { text: 'البلاك: ' + blacklist.join(', ') })
+      if (text === 'بلاك' || text === '.بلاك') {
+        await sock.sendMessage(from, { text: formatBlacklist() })
         return
       }
-
+      if (text === '.بيضاء_فقط') {
+        await sock.sendMessage(from, { text: formatWhitelist() })
+        return
+      }
       if (text.startsWith('.ابلاغ')) {
         if (!isGroup) return
         let nums = getNums(text)
-        for (let last of nums) {
+        for (let full of nums) {
+          let last = full.slice(-9)
           reports[last] = (reports[last] || 0) + 1
-          if (reports[last] >= 4) doKick(from, last + '@s.whatsapp.net', '4 بلاغات')
+          if (reports[last] >= 4) doKick(from, full + '@s.whatsapp.net', '4 بلاغات')
         }
         save('report-history.json', reports)
         await sock.sendMessage(from, { text: 'تم الابلاغ عن ' + nums.length + ' رقم' })
         return
       }
-
       if (text.startsWith('.band') || text === 'تبنيد') {
         let word = text.replace('.band', '').trim()
         if (word) {
@@ -354,7 +338,6 @@ async function startBot() {
         }
         return
       }
-
     } catch(e) { console.log('خطأ رسالة', e.message) }
   })
 
@@ -367,10 +350,8 @@ async function startBot() {
         for (let p of parts) {
           let id = p.id || p
           let last = getLastDigits(id)
-          if (blacklist.includes(last) || (reports[last] && reports[last] >= 4)) {
-            if (!whitelist.includes(last) && !isOwner(id)) {
-              doKick(gid, id, 'تنظيف دوري')
-            }
+          if (isInList(blacklist, id) || (reports[last] && reports[last] >= 4)) {
+            if (!isInList(whitelist, id) && !isOwner(id)) doKick(gid, id, 'تنظيف دوري')
           }
         }
       }
