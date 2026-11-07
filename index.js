@@ -42,7 +42,7 @@ const hasLink = (t) => {
   let clean = t.toLowerCase().replace(/\s+/g,'').replace(/[:;]/g,':');
   return /(https?:\/\/|www\.|t\.me\/|telegram\.me\/|wa\.me\/|whatsapp\.com\/|discord\.gg\/|instagram\.com\/|facebook\.com\/|youtube\.com\/|tiktok\.com\/|\.com|\.net|\.org|\.ly|\.io)/.test(clean);
 };
-const BAN_WORDS = ['.ban', '\u062a\u0628\u0646\u064a\u062f', '\u062a\u062e\u0631\u064a\u0628', '\u0647\u0643\u0631'];
+const BAN_WORDS = ['.ban', 'تبنيد', 'تخريب', 'هكر'];
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
   const { version } = await fetchLatestBaileysVersion();
@@ -50,7 +50,7 @@ async function startBot() {
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', (u) => {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
-    if (u.connection === 'open') { qrCode = ''; console.log('Bot connected'); notifyOwner('Bot connected OK'); }
+    if (u.connection === 'open') { qrCode = ''; console.log('Bot connected'); notifyOwner('✅ البوت متصل'); }
     if (u.connection === 'close') {
       const should = (u.lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
       if (should) startBot();
@@ -73,7 +73,7 @@ async function startBot() {
           }
         }
         saveLists();
-        await notifyOwner('Raid attack! Locked group and kicked');
+        await notifyOwner('🚨 هجوم بوتات! سكرت القروب وطردتهم');
         joinTimes[jid] = [];
       }
     } catch (e) { console.log('Raid Error:', e.message); }
@@ -95,16 +95,16 @@ async function startBot() {
         const isSticker = !!m.message.stickerMessage;
         if (isBlackSender && !isOwnerSender) { await deleteMsg(from, m.key); await kickUser(from, sender); continue; }
         if (isOwnerSender) {
-          if (lower === '.ping') { await notifyOwner('Bot online OK'); continue; }
-          if (lower === '.white' || lower === '.\u0628\u064a\u0636\u0627\u0621') { await notifyOwner('White: ' + (whiteList.length ? whiteList.join(',') : 'empty')); continue; }
-          if (lower === '.black' || lower === '.\u0628\u0644\u0627\u0643') { await notifyOwner('Black: ' + (blackList.length ? blackList.join(',') : 'empty')); continue; }
-          if (lower === '.list' || lower === '.\u0642\u0627\u0626\u0645\u0629') { await notifyOwner('White: ' + whiteList.length + '\nBlack: ' + blackList.length); continue; }
-          if (lower.startsWith('.addwhite') || lower.startsWith('.\u0627\u0628\u064a\u0636')) { let n = norm(text); if (n) { if (!whiteList.includes(n)) whiteList.push(n); saveLists(); await notifyOwner('Added white: ' + n); } continue; }
-          if (lower.startsWith('.delwhite') || lower.startsWith('.\u0627\u0644\u063a\u0627\u0621\u0020\u0627\u0628\u064a\u0636')) { let n = norm(text); whiteList = whiteList.filter(x => x !== n); saveLists(); await notifyOwner('Removed white: ' + n); continue; }
-          if (lower.startsWith('.addblack') || lower.startsWith('.\u0627\u0636\u0641\u0020\u0628\u0644\u0627\u0643') || lower.startsWith('.\u0628\u0644\u0627\u0643\u0020\u0627\u0636\u0641')) { let n = norm(text); if (n) { if (!blackList.includes(n)) blackList.push(n); saveLists(); await notifyOwner('Added black: ' + n); } continue; }
-          if (lower.startsWith('.delblack') || lower.startsWith('.\u0627\u0644\u063a\u0627\u0621\u0020\u0628\u0644\u0627\u0643')) { let n = norm(text); blackList = blackList.filter(x => x !== n); saveLists(); await notifyOwner('Removed black: ' + n); continue; }
-          if (lower.startsWith('.clearwhite') || lower.startsWith('.\u062d\u0630\u0641\u0020\u0627\u0628\u064a\u0636')) { whiteList = []; saveLists(); await notifyOwner('Cleared white'); continue; }
-          if (lower.startsWith('.clearblack') || lower.startsWith('.\u062d\u0630\u0641\u0020\u0628\u0644\u0627\u0643')) { blackList = []; saveLists(); await notifyOwner('Cleared black'); continue; }
+          if (lower === '.ping') { await notifyOwner('✅ Bot online'); continue; }
+          if (lower === '.بيضاء') { await notifyOwner('🤍 البيضاء:\n' + (whiteList.length ? whiteList.join('\n') : 'فاضية')); continue; }
+          if (lower === '.بلاك') { await notifyOwner('🚫 البلاك:\n' + (blackList.length ? blackList.join('\n') : 'فاضي')); continue; }
+          if (lower === '.قائمة') { await notifyOwner('🤍 بيضاء: ' + whiteList.length + '\n🚫 بلاك: ' + blackList.length); continue; }
+          if (lower.startsWith('.ابيض')) { let n = norm(text); if (n) { if (!whiteList.includes(n)) whiteList.push(n); saveLists(); await notifyOwner('✅ ضفته للبيضاء: ' + n); } continue; }
+          if (lower.startsWith('.الغاء ابيض')) { let n = norm(text); whiteList = whiteList.filter(x => x !== n); saveLists(); await notifyOwner('✅ نحيته من البيضاء: ' + n); continue; }
+          if (lower.startsWith('.اضف بلاك')) { let n = norm(text); if (n) { if (!blackList.includes(n)) blackList.push(n); saveLists(); await notifyOwner('✅ ضفته للبلاك: ' + n); } continue; }
+          if (lower.startsWith('.الغاء بلاك')) { let n = norm(text); blackList = blackList.filter(x => x !== n); saveLists(); await notifyOwner('✅ نحيته من البلاك: ' + n); continue; }
+          if (lower.startsWith('.حذف ابيض')) { whiteList = []; saveLists(); await notifyOwner('✅ مسحت البيضاء كلها'); continue; }
+          if (lower.startsWith('.حذف بلاك')) { blackList = []; saveLists(); await notifyOwner('✅ مسحت البلاك كله'); continue; }
           continue;
         }
         if (isWhiteSender) continue;
@@ -112,13 +112,13 @@ async function startBot() {
           await deleteMsg(from, m.key);
           if (!blackList.includes(senderNum)) { blackList.push(senderNum); saveLists(); }
           await kickUser(from, sender);
-          await notifyOwner('Kicked ban word: ' + senderNum);
+          await notifyOwner('🚨 طردت ' + senderNum + ' السبب: كلمة تبنيد');
           continue;
         }
         if (isForward) {
           await deleteMsg(from, m.key);
           await kickUser(from, sender);
-          await notifyOwner('Kicked forward: ' + senderNum);
+          await notifyOwner('🚨 طردت ' + senderNum + ' السبب: إعادة توجيه');
           continue;
         }
         if (hasLink(text)) {
@@ -126,11 +126,11 @@ async function startBot() {
           linkCount[senderNum] = (linkCount[senderNum] || 0) + 1;
           if (linkCount[senderNum] >= 2) {
             await kickUser(from, sender);
-            await notifyOwner('Kicked link: ' + senderNum);
+            await notifyOwner('🚨 طردت ' + senderNum + ' السبب: رابط مكرر');
             linkCount[senderNum] = 0;
           } else {
             await lockGroup(from);
-            await notifyOwner('Locked group link from: ' + senderNum);
+            await notifyOwner('🔒 سكرت القروب 5 دقايق - ' + senderNum + ' بعت رابط');
           }
           continue;
         }
@@ -141,7 +141,7 @@ async function startBot() {
           stickerCount[senderNum].push(now);
           if (stickerCount[senderNum].length > 2) {
             await deleteMsg(from, m.key);
-            await notifyOwner('Deleted sticker spam: ' + senderNum);
+            await notifyOwner('🧹 حذفت ملصق سبام من ' + senderNum);
             continue;
           }
         }
@@ -151,7 +151,7 @@ async function startBot() {
         floodCount[senderNum].push(now2);
         if (floodCount[senderNum].length > 5) {
           await deleteMsg(from, m.key);
-          await notifyOwner('Deleted flood: ' + senderNum);
+          await notifyOwner('🧹 حذفت فيضان من ' + senderNum);
         }
       } catch (e) { console.log('Error:', e.message); }
     }
