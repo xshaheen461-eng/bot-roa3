@@ -9,11 +9,14 @@ let qrCode = '';
 let sock = null;
 let whiteList = [];
 let blackList = [];
+let lockLinks = false;
 try { whiteList = JSON.parse(fs.readFileSync('whitelist.json')); } catch {}
 try { blackList = JSON.parse(fs.readFileSync('blacklist.json')); } catch {}
+try { lockLinks = JSON.parse(fs.readFileSync('settings.json')).lockLinks || false; } catch {}
 const saveLists = () => {
   fs.writeFileSync('whitelist.json', JSON.stringify(whiteList));
   fs.writeFileSync('blacklist.json', JSON.stringify(blackList));
+  fs.writeFileSync('settings.json', JSON.stringify({ lockLinks }));
 };
 const norm = s => (s||'').replace(/[^0-9]/g,'');
 const isOwner = n => norm(n) === OWNER_NUMBER;
@@ -26,6 +29,9 @@ let joinTimes = {};
 async function notifyOwner(text) {
   if (!sock) return;
   try { await sock.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', { text }); } catch {}
+}
+async function reply(jid, text) {
+  try { await sock.sendMessage(jid, { text }); } catch {}
 }
 async function lockGroup(jid) {
   try { await sock.groupSettingUpdate(jid, 'announcement'); } catch {}
@@ -73,6 +79,7 @@ async function startBot() {
           }
         }
         saveLists();
+        await reply(jid, '🚨 هجوم بوتات! سكرت القروب وطردتهم');
         await notifyOwner('🚨 هجوم بوتات! سكرت القروب وطردتهم');
         joinTimes[jid] = [];
       }
@@ -95,19 +102,48 @@ async function startBot() {
         const isSticker = !!m.message.stickerMessage;
         if (isBlackSender && !isOwnerSender) { await deleteMsg(from, m.key); await kickUser(from, sender); continue; }
         if (isOwnerSender) {
-          if (lower === '.ping') { await notifyOwner('✅ Bot online'); continue; }
-          if (lower === '.بيضاء') { await notifyOwner('🤍 البيضاء:\n' + (whiteList.length ? whiteList.join('\n') : 'فاضية')); continue; }
-          if (lower === '.بلاك') { await notifyOwner('🚫 البلاك:\n' + (blackList.length ? blackList.join('\n') : 'فاضي')); continue; }
-          if (lower === '.قائمة') { await notifyOwner('🤍 بيضاء: ' + whiteList.length + '\n🚫 بلاك: ' + blackList.length); continue; }
-          if (lower === '.فتح') { try { await sock.groupSettingUpdate(from, 'not_announcement'); await notifyOwner('✅ فتحت القروب'); } catch {} continue; }
-          if (lower === '.سكر' || lower === '.قفل') { try { await sock.groupSettingUpdate(from, 'announcement'); await notifyOwner('🔒 سكرت القروب'); } catch {} continue; }
-          if (lower === '.حذف') { whiteList = []; blackList = []; saveLists(); await notifyOwner('✅ مسحت البيضاء والبلاك كلهم'); continue; }
-          if (lower.startsWith('.ابيض')) { let n = norm(text); if (n) { if (!whiteList.includes(n)) whiteList.push(n); saveLists(); await notifyOwner('✅ ضفته للبيضاء: ' + n); } continue; }
-          if (lower.startsWith('.الغاء ابيض')) { let n = norm(text); whiteList = whiteList.filter(x => x !== n); saveLists(); await notifyOwner('✅ نحيته من البيضاء: ' + n); continue; }
-          if (lower.startsWith('.اضف بلاك')) { let n = norm(text); if (n) { if (!blackList.includes(n)) blackList.push(n); saveLists(); await notifyOwner('✅ ضفته للبلاك: ' + n); } continue; }
-          if (lower.startsWith('.الغاء بلاك')) { let n = norm(text); blackList = blackList.filter(x => x !== n); saveLists(); await notifyOwner('✅ نحيته من البلاك: ' + n); continue; }
-          if (lower.startsWith('.حذف ابيض')) { whiteList = []; saveLists(); await notifyOwner('✅ مسحت البيضاء كلها'); continue; }
-          if (lower.startsWith('.حذف بلاك')) { blackList = []; saveLists(); await notifyOwner('✅ مسحت البلاك كله'); continue; }
+          if (lower === '.ping') { await reply(from, '✅ Bot online'); continue; }
+          if (lower === '.ادوات') {
+            let meta = await sock.groupMetadata(from);
+            let admins = meta.participants.filter(p => p.admin).length;
+            let menu = '╭─── 🍷 ───╮\n';
+            menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
+            menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
+            menu += '│ 👥 الأعضاء: ' + meta.participants.length + '\n';
+            menu += '│ 🛡️ المشرفين: ' + admins + '\n';
+            menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
+            menu += '│ 📌 الحالة: مفتوح\n';
+            menu += '╰─── 🍷 ───╯\n\n';
+            menu += '⚙️ ادوات اضافية ⚙️\n';
+            menu += '• .ابيض + رقم\n• .الغاء ابيض + رقم\n• .اضف بلاك + رقم\n• .الغاء بلاك + رقم\n• .بيضاء\n• .بلاك\n• .قائمة\n• .حذف / .حذف ابيض / .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .ping\n\nMADE BY RAYMON';
+            await reply(from, menu); continue;
+          }
+          if (lower === '.معلومات') {
+            let meta = await sock.groupMetadata(from);
+            let admins = meta.participants.filter(p => p.admin).length;
+            let info = '╭─── 🍷 ───╮\n';
+            info += '│ 📛 القروب: ' + meta.subject + '\n';
+            info += '│ 👥 الأعضاء: ' + meta.participants.length + '\n';
+            info += '│ 🛡️ المشرفين: ' + admins + '\n';
+            info += '│ 🔓 الحالة: مفتوح\n';
+            info += '│ 📅 التاريخ: ' + new Date().toLocaleString('ar-LY') + '\n';
+            info += '╰─── 🍷 ───╯\nMADE BY RAYMON';
+            await reply(from, info); continue;
+          }
+          if (lower === '.بيضاء') { await reply(from, '🤍 البيضاء:\n' + (whiteList.length ? whiteList.join('\n') : 'فاضية')); continue; }
+          if (lower === '.بلاك') { await reply(from, '🚫 البلاك:\n' + (blackList.length ? blackList.join('\n') : 'فاضي')); continue; }
+          if (lower === '.قائمة') { await reply(from, '🤍 بيضاء: ' + whiteList.length + '\n🚫 بلاك: ' + blackList.length); continue; }
+          if (lower === '.فتح') { try { await sock.groupSettingUpdate(from, 'not_announcement'); await reply(from, '✅ فتحت القروب'); } catch {} continue; }
+          if (lower === '.سكر' || lower === '.قفل') { try { await sock.groupSettingUpdate(from, 'announcement'); await reply(from, '🔒 سكرت القروب'); } catch {} continue; }
+          if (lower === '.قفل الروابط') { lockLinks = true; saveLists(); await reply(from, '🔗 قفلت الروابط'); continue; }
+          if (lower === '.فتح الروابط') { lockLinks = false; saveLists(); await reply(from, '🔗 فتحت الروابط'); continue; }
+          if (lower === '.حذف') { whiteList = []; blackList = []; saveLists(); await reply(from, '✅ مسحت البيضاء والبلاك كلهم'); continue; }
+          if (lower.startsWith('.ابيض')) { let n = norm(text); if (n) { if (!whiteList.includes(n)) whiteList.push(n); saveLists(); await reply(from, '✅ ضفته للبيضاء: ' + n); } continue; }
+          if (lower.startsWith('.الغاء ابيض')) { let n = norm(text); whiteList = whiteList.filter(x => x !== n); saveLists(); await reply(from, '✅ نحيته من البيضاء: ' + n); continue; }
+          if (lower.startsWith('.اضف بلاك')) { let n = norm(text); if (n) { if (!blackList.includes(n)) blackList.push(n); saveLists(); await reply(from, '✅ ضفته للبلاك: ' + n); } continue; }
+          if (lower.startsWith('.الغاء بلاك')) { let n = norm(text); blackList = blackList.filter(x => x !== n); saveLists(); await reply(from, '✅ نحيته من البلاك: ' + n); continue; }
+          if (lower.startsWith('.حذف ابيض')) { whiteList = []; saveLists(); await reply(from, '✅ مسحت البيضاء كلها'); continue; }
+          if (lower.startsWith('.حذف بلاك')) { blackList = []; saveLists(); await reply(from, '✅ مسحت البلاك كله'); continue; }
           continue;
         }
         if (isWhiteSender) continue;
@@ -115,25 +151,33 @@ async function startBot() {
           await deleteMsg(from, m.key);
           if (!blackList.includes(senderNum)) { blackList.push(senderNum); saveLists(); }
           await kickUser(from, sender);
+          await reply(from, '🚨 طردت ' + senderNum + ' السبب: كلمة تبنيد');
           await notifyOwner('🚨 طردت ' + senderNum + ' السبب: كلمة تبنيد');
           continue;
         }
         if (isForward) {
           await deleteMsg(from, m.key);
           await kickUser(from, sender);
+          await reply(from, '🚨 طردت ' + senderNum + ' السبب: إعادة توجيه');
           await notifyOwner('🚨 طردت ' + senderNum + ' السبب: إعادة توجيه');
           continue;
         }
         if (hasLink(text)) {
+          if (lockLinks) {
+            await deleteMsg(from, m.key);
+            await kickUser(from, sender);
+            await reply(from, '🚨 طردت ' + senderNum + ' السبب: الروابط مقفولة');
+            continue;
+          }
           await deleteMsg(from, m.key);
           linkCount[senderNum] = (linkCount[senderNum] || 0) + 1;
           if (linkCount[senderNum] >= 2) {
             await kickUser(from, sender);
-            await notifyOwner('🚨 طردت ' + senderNum + ' السبب: رابط مكرر');
+            await reply(from, '🚨 طردت ' + senderNum + ' السبب: رابط مكرر');
             linkCount[senderNum] = 0;
           } else {
             await lockGroup(from);
-            await notifyOwner('🔒 سكرت القروب 5 دقايق - ' + senderNum + ' بعت رابط');
+            await reply(from, '🔒 سكرت القروب 5 دقايق - ' + senderNum + ' بعت رابط');
           }
           continue;
         }
@@ -144,7 +188,7 @@ async function startBot() {
           stickerCount[senderNum].push(now);
           if (stickerCount[senderNum].length > 2) {
             await deleteMsg(from, m.key);
-            await notifyOwner('🧹 حذفت ملصق سبام من ' + senderNum);
+            await reply(from, '🧹 حذفت ملصق سبام من ' + senderNum);
             continue;
           }
         }
@@ -154,7 +198,7 @@ async function startBot() {
         floodCount[senderNum].push(now2);
         if (floodCount[senderNum].length > 5) {
           await deleteMsg(from, m.key);
-          await notifyOwner('🧹 حذفت فيضان من ' + senderNum);
+          await reply(from, '🧹 حذفت فيضان من ' + senderNum);
         }
       } catch (e) { console.log('Error:', e.message); }
     }
