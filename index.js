@@ -42,7 +42,7 @@ const hasLink = (t) => {
   let clean = t.toLowerCase().replace(/\s+/g,'').replace(/[:;]/g,':');
   return /(https?:\/\/|www\.|t\.me\/|telegram\.me\/|wa\.me\/|whatsapp\.com\/|discord\.gg\/|instagram\.com\/|facebook\.com\/|youtube\.com\/|tiktok\.com\/|\.com|\.net|\.org|\.ly|\.io)/.test(clean);
 };
-const BAN_WORDS = ['.ban', 'تبنيد', 'تخريب', 'هكر'];
+const BAN_WORDS = ['.ban', '\u062a\u0628\u0646\u064a\u062f', '\u062a\u062e\u0631\u064a\u0628', '\u0647\u0643\u0631'];
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
   const { version } = await fetchLatestBaileysVersion();
@@ -96,15 +96,15 @@ async function startBot() {
         if (isBlackSender && !isOwnerSender) { await deleteMsg(from, m.key); await kickUser(from, sender); continue; }
         if (isOwnerSender) {
           if (lower === '.ping') { await notifyOwner('Bot online OK'); continue; }
-          if (lower === '.white' || lower === '.بيضاء') { await notifyOwner('White: ' + (whiteList.length ? whiteList.join(',') : 'empty')); continue; }
-          if (lower === '.black' || lower === '.بلاك') { await notifyOwner('Black: ' + (blackList.length ? blackList.join(',') : 'empty')); continue; }
-          if (lower === '.list' || lower === '.قائمة') { await notifyOwner('White: ' + whiteList.length + '\nBlack: ' + blackList.length); continue; }
-          if (lower.startsWith('.addwhite') || lower.startsWith('.ابيض')) { let n = norm(text); if 👎 { if (!whiteList.includes(n)) whiteList.push(n); saveLists(); await notifyOwner('Added white: ' + n); } continue; }
-          if (lower.startsWith('.delwhite') || lower.startsWith('.الغاء ابيض')) { let n = norm(text); whiteList = whiteList.filter(x => x !== n); saveLists(); await notifyOwner('Removed white: ' + n); continue; }
-          if (lower.startsWith('.addblack') || lower.startsWith('.بلاك اضف') || lower.startsWith('.اضف بلاك')) { let n = norm(text); if 👎 { if (!blackList.includes(n)) blackList.push(n); saveLists(); await notifyOwner('Added black: ' + n); } continue; }
-          if (lower.startsWith('.delblack') || lower.startsWith('.الغاء بلاك')) { let n = norm(text); blackList = blackList.filter(x => x !== n); saveLists(); await notifyOwner('Removed black: ' + n); continue; }
-          if (lower.startsWith('.clearwhite') || lower.startsWith('.حذف ابيض')) { whiteList = []; saveLists(); await notifyOwner('Cleared white'); continue; }
-          if (lower.startsWith('.clearblack') || lower.startsWith('.حذف بلاك')) { blackList = []; saveLists(); await notifyOwner('Cleared black'); continue; }
+          if (lower === '.white' || lower === '.\u0628\u064a\u0636\u0627\u0621') { await notifyOwner('White: ' + (whiteList.length ? whiteList.join(',') : 'empty')); continue; }
+          if (lower === '.black' || lower === '.\u0628\u0644\u0627\u0643') { await notifyOwner('Black: ' + (blackList.length ? blackList.join(',') : 'empty')); continue; }
+          if (lower === '.list' || lower === '.\u0642\u0627\u0626\u0645\u0629') { await notifyOwner('White: ' + whiteList.length + '\nBlack: ' + blackList.length); continue; }
+          if (lower.startsWith('.addwhite') || lower.startsWith('.\u0627\u0628\u064a\u0636')) { let n = norm(text); if 👎 { if (!whiteList.includes(n)) whiteList.push(n); saveLists(); await notifyOwner('Added white: ' + n); } continue; }
+          if (lower.startsWith('.delwhite') || lower.startsWith('.\u0627\u0644\u063a\u0627\u0621\u0020\u0627\u0628\u064a\u0636')) { let n = norm(text); whiteList = whiteList.filter(x => x !== n); saveLists(); await notifyOwner('Removed white: ' + n); continue; }
+          if (lower.startsWith('.addblack') || lower.startsWith('.\u0627\u0636\u0641\u0020\u0628\u0644\u0627\u0643') || lower.startsWith('.\u0628\u0644\u0627\u0643\u0020\u0627\u0636\u0641')) { let n = norm(text); if 👎 { if (!blackList.includes(n)) blackList.push(n); saveLists(); await notifyOwner('Added black: ' + n); } continue; }
+          if (lower.startsWith('.delblack') || lower.startsWith('.\u0627\u0644\u063a\u0627\u0621\u0020\u0628\u0644\u0627\u0643')) { let n = norm(text); blackList = blackList.filter(x => x !== n); saveLists(); await notifyOwner('Removed black: ' + n); continue; }
+          if (lower.startsWith('.clearwhite') || lower.startsWith('.\u062d\u0630\u0641\u0020\u0627\u0628\u064a\u0636')) { whiteList = []; saveLists(); await notifyOwner('Cleared white'); continue; }
+          if (lower.startsWith('.clearblack') || lower.startsWith('.\u062d\u0630\u0641\u0020\u0628\u0644\u0627\u0643')) { blackList = []; saveLists(); await notifyOwner('Cleared black'); continue; }
           continue;
         }
         if (isWhiteSender) continue;
