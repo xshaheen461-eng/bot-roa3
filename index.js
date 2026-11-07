@@ -1,3 +1,4 @@
+
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys')
 const pino = require('pino')
 const express = require('express')
@@ -16,12 +17,10 @@ app.get('/qr', async (req, res) => {
 })
 app.listen(process.env.PORT || 3000, () => console.log('Server on'))
 
-// ===== الارقام =====
 const OWNER_NUMBER = (process.env.OWNER_NUMBER || "").replace(/\D/g, '')
 const OWNER_LID = (process.env.OWNER_LID || "").trim()
 const BOT_NUMBER = (process.env.BOT_NUMBER || "").replace(/\D/g, '')
 
-// ===== ملفات =====
 function load(f, def) { try { if (fs.existsSync(f)) return JSON.parse(fs.readFileSync(f)) } catch(e){} return def }
 function save(f, d) { fs.writeFileSync(f, JSON.stringify(d)) }
 let whitelist = load('whitelist.json', [])
@@ -29,10 +28,8 @@ let blacklist = load('blacklist.json', [])
 let reports = load('report-history.json', {})
 let bannedWords = load('banned.json', [])
 
-// ===== فلتر الدول - العربية بس =====
 const ALLOWED_CODES = ['218','20','212','213','216','222','249','211','252','253','269','967','966','971','974','965','973','968','962','961','963','964','970']
 
-// ===== دوال مساعدة =====
 function getLastDigits(jid) {
   if (!jid) return ''
   let d = jid.replace(/\D/g, '')
@@ -46,10 +43,19 @@ function isOwner(jid) {
   if (!OWNER_NUMBER) return false
   return d.includes(OWNER_NUMBER) || d.endsWith(OWNER_NUMBER.slice(-9))
 }
+// ===== جديد: يطلع كل الارقام من الرسالة =====
+function getNums(text) {
+  if (!text) return []
+  // يطلع اي مجموعة ارقام من 9 ل 15 رقم
+  let matches = text.match(/\d{9,15}/g) || []
+  // ناخد اخر 9 ارقام من كل رقم، ونحيد التكرار
+  let out = [...new Set(matches.map(n => n.slice(-9)))]
+  // نحيد الارقام اللي هي اوامر او قصيرة
+  return out.filter(n => n.length === 9)
+}
 function getNum(text) {
-  if (!text) return ''
-  let m = text.replace(/\D/g, '')
-  return m
+  let all = getNums(text)
+  return all[0] || ''
 }
 function isAllowedNumber(jid) {
   if (!jid) return false
@@ -60,7 +66,6 @@ function isAllowedNumber(jid) {
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-// ===== طرد بطيء ضد الباند =====
 let kickQueue = []
 let kicking = false
 async function doKick(groupId, userId, reason) {
@@ -78,7 +83,6 @@ async function doKick(groupId, userId, reason) {
   kicking = false
 }
 
-// ===== الفيضان =====
 let joins = []
 let joinRequests = []
 
@@ -105,18 +109,15 @@ async function startBot() {
     }
   })
 
-  // ===== دخول وخروج =====
   sock.ev.on('group-participants.update', async (anu) => {
     try {
       let groupId = anu.id
       let action = anu.action
       let participants = anu.participants || []
-
       if (action === 'demote') {
         for (let p of participants) {
           if (p.includes(BOT_NUMBER) || getLastDigits(p) === BOT_NUMBER.slice(-9)) {
             let actor = anu.author || ''
-            console.log('حد سحب الاشراف من البوت:', actor)
             if (!isOwner(actor)) {
               await sock.groupParticipantsUpdate(groupId, [actor], 'remove')
             }
@@ -124,7 +125,6 @@ async function startBot() {
         }
         return
       }
-
       if (action === 'add') {
         let now = Date.now()
         joins.push(now)
@@ -136,13 +136,11 @@ async function startBot() {
             try {
               await sock.groupSettingUpdate(groupId, 'not_announcement')
               await sock.groupRevokeInvite(groupId)
-              console.log('تم فتح القروب وتغيير الرابط')
             } catch(e){}
           }, 5 * 60 * 1000)
           joins = []
           return
         }
-
         for (let user of participants) {
           if (blacklist.includes(getLastDigits(user)) || blacklist.includes(user)) {
             doKick(groupId, user, 'بلاك')
@@ -168,7 +166,6 @@ async function startBot() {
           await sleep(4000)
         }
       }
-
       if (action === 'join_request') {
         let now = Date.now()
         joinRequests.push(now)
@@ -181,31 +178,31 @@ async function startBot() {
     } catch(e) { console.log('خطأ participants', e.message) }
   })
 
-  // ===== الرسائل =====
   sock.ev.on('messages.upsert', async (m) => {
     try {
       let msg = m.messages[0]
       if (!msg.message) return
-      // تصليح fromMe - البوت على نفس رقمك
       let isSelf = msg.key.fromMe
       let from = msg.key.remoteJid
       let isGroup = from.endsWith('@g.us')
       let sender = msg.key.participant || msg.key.remoteJidAlt || msg.key.remoteJid
-      if (sender.includes('@lid') && msg.key.remoteJidAlt) {
-        sender = msg.key.remoteJidAlt
-      }
+      if (sender.includes('@lid') && msg.key.remoteJidAlt) sender = msg.key.remoteJidAlt
       if (msg.key.participant && msg.key.participant.includes('@lid')) {
         sender = msg.key.participant
-        if (msg.key.remoteJidAlt && !msg.key.remoteJidAlt.includes('@lid')) {
-          sender = msg.key.remoteJidAlt
-        }
+        if (msg.key.remoteJidAlt && !msg.key.remoteJidAlt.includes('@lid')) sender = msg.key.remoteJidAlt
       }
 
       let text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || ''
       if (!text) return
       text = text.trim()
 
-      if (text === '.ping') console.log('PING من:', msg.key.participant, 'Alt:', msg.key.remoteJidAlt, 'Sender:', sender, 'Self:', isSelf)
+      // لو رديت على رسالة فيها ارقام، خود الارقام من الرسالة الاصلية
+      let quotedText = msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.conversation || msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text || ''
+      if (quotedText && (text.includes('.ابيض') || text.includes('.حظر') || text.includes('.حضر') || text.includes('.فك'))) {
+        text = quotedText + '\n' + text
+      }
+
+      if (text === '.ping') console.log('PING من:', sender, 'Self:', isSelf)
 
       if (text.startsWith('3EB0')) {
         if (isGroup) {
@@ -226,7 +223,6 @@ async function startBot() {
         }
       }
 
-      // اوامر المالك: يا مالك يا انت نفسك
       if (!isOwner(sender) && !isSelf) return
 
       if (text === '.ping') {
@@ -236,9 +232,9 @@ async function startBot() {
 
       if (text.startsWith('.طرد')) {
         if (!isGroup) return
-        let num = getNum(text)
-        let target = num + '@s.whatsapp.net'
-        doKick(from, target, 'امر مالك')
+        let nums = getNums(text)
+        for (let n of nums) doKick(from, n + '@s.whatsapp.net', 'امر مالك')
+        if (nums.length > 0) await sock.sendMessage(from, { text: 'تم طرد ' + nums.length + ' عضو' })
         return
       }
 
@@ -266,41 +262,58 @@ async function startBot() {
         return
       }
 
-      if (text.startsWith('.حظر') || text.startsWith('.حضر')) {
-        let num = getNum(text)
-        if (num) {
-          let last = num.slice(-9)
-          if (!blacklist.includes(last)) blacklist.push(last)
-          save('blacklist.json', blacklist)
-          await sock.sendMessage(from, { text: 'تم حظر ' + num })
-          if (isGroup) doKick(from, num + '@s.whatsapp.net', 'حظر')
-        }
-        return
-      }
-
-      if (text.startsWith('.فك')) {
-        let num = getNum(text)
-        if (num) {
-          let last = num.slice(-9)
-          blacklist = blacklist.filter(x => x !== last && x !== num)
-          save('blacklist.json', blacklist)
-          await sock.sendMessage(from, { text: 'تم فك ' + num })
-        }
-        return
-      }
-
-      if (text.startsWith('.ابيض') || text.startsWith('.الغاء_ابيض')) {
-        let num = getNum(text)
-        if (num) {
-          let last = num.slice(-9)
-          if (text.startsWith('.الغاء_ابيض')) {
+      // ===== حظر جماعي =====
+      if (text.includes('.حظر') || text.includes('.حضر')) {
+        let nums = getNums(text)
+        if (nums.length > 0) {
+          let added = 0
+          for (let last of nums) {
+            if (!blacklist.includes(last)) { blacklist.push(last); added++ }
+            // لو كان في البيضاء نحيه منها
             whitelist = whitelist.filter(x => x !== last)
-            await sock.sendMessage(from, { text: 'تم الغاء من البيضاء ' + num })
-          } else {
-            if (!whitelist.includes(last)) whitelist.push(last)
-            await sock.sendMessage(from, { text: 'تم اضافة للبيضاء ' + num })
+            if (isGroup) doKick(from, last + '@s.whatsapp.net', 'حظر جماعي')
           }
+          save('blacklist.json', blacklist)
           save('whitelist.json', whitelist)
+          await sock.sendMessage(from, { text: '⛔ تم حظر ' + added + ' رقم\n' + nums.join(', ') })
+        } else {
+          await sock.sendMessage(from, { text: 'مافيش ارقام، ابعت الارقام مع .حظر في نفس الرسالة' })
+        }
+        return
+      }
+
+      // ===== فك حظر جماعي =====
+      if (text.includes('.فك')) {
+        let nums = getNums(text)
+        if (nums.length > 0) {
+          for (let last of nums) blacklist = blacklist.filter(x => x !== last)
+          save('blacklist.json', blacklist)
+          await sock.sendMessage(from, { text: 'تم فك ' + nums.length + ' رقم' })
+        }
+        return
+      }
+
+      // ===== بيضاء جماعي =====
+      if (text.includes('.ابيض') || text.includes('.الغاء_ابيض')) {
+        let nums = getNums(text)
+        if (nums.length > 0) {
+          if (text.includes('.الغاء_ابيض')) {
+            for (let last of nums) whitelist = whitelist.filter(x => x !== last)
+            save('whitelist.json', whitelist)
+            await sock.sendMessage(from, { text: 'تم الغاء ' + nums.length + ' من البيضاء' })
+          } else {
+            let added = 0
+            for (let last of nums) {
+              if (!whitelist.includes(last)) { whitelist.push(last); added++ }
+              // لو كان في البلاك نحيه
+              blacklist = blacklist.filter(x => x !== last)
+            }
+            save('whitelist.json', whitelist)
+            save('blacklist.json', blacklist)
+            await sock.sendMessage(from, { text: '✅ تم اضافة ' + added + ' رقم للبيضاء\n' + nums.join(', ') })
+          }
+        } else {
+          await sock.sendMessage(from, { text: 'مافيش ارقام، ابعت الارقام مع .ابيض في نفس الرسالة' })
         }
         return
       }
@@ -322,16 +335,13 @@ async function startBot() {
 
       if (text.startsWith('.ابلاغ')) {
         if (!isGroup) return
-        let num = getNum(text)
-        if (num) {
-          let last = num.slice(-9)
+        let nums = getNums(text)
+        for (let last of nums) {
           reports[last] = (reports[last] || 0) + 1
-          save('report-history.json', reports)
-          await sock.sendMessage(from, { text: 'تم الابلاغ عن ' + num + ' عدد البلاغات: ' + reports[last] })
-          if (reports[last] >= 4) {
-            doKick(from, num + '@s.whatsapp.net', '4 بلاغات')
-          }
+          if (reports[last] >= 4) doKick(from, last + '@s.whatsapp.net', '4 بلاغات')
         }
+        save('report-history.json', reports)
+        await sock.sendMessage(from, { text: 'تم الابلاغ عن ' + nums.length + ' رقم' })
         return
       }
 
