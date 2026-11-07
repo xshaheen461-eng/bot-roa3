@@ -93,15 +93,17 @@ async function startBot() {
         const isGroup = from?.endsWith('@g.us');
         const sender = m.key.participant || m.key.remoteJid;
         const senderNum = norm(sender);
-        const isOwnerSender = isOwner(senderNum) || m.key.fromMe;
+        const senderLid = m.key.participantAlt || sender;
+        const isOwnerSender = isOwner(senderNum) || m.key.fromMe || sender === OWNER_NUMBER + '@s.whatsapp.net';
         const isWhiteSender = isWhite(senderNum);
         const isBlackSender = isBlack(senderNum);
         const text = m.message.conversation || m.message.extendedTextMessage?.text || m.message.imageMessage?.caption || m.message.videoMessage?.caption || '';
-        const lower = text.toLowerCase().trim();
+        const lower = text.toLowerCase().trim().replace(/_/g,' ');
         const isForward = m.message.extendedTextMessage?.contextInfo?.isForwarded || m.message.imageMessage?.contextInfo?.isForwarded || m.message.videoMessage?.contextInfo?.isForwarded;
         const isSticker = !!m.message.stickerMessage;
-        const quoted = m.message.extendedTextMessage?.contextInfo?.participant;
-        const replyTo = m.message.extendedTextMessage?.contextInfo?.quotedMessage ? quoted : null;
+        const ctx = m.message.extendedTextMessage?.contextInfo;
+        const quotedParticipant = ctx?.participant;
+        const quotedKey = ctx?.stanzaId ? { remoteJid: from, id: ctx.stanzaId, participant: quotedParticipant, fromMe: false } : null;
         if (isOwnerSender) {
           if (lower === '.ping') { await reply(from, '✅ Bot online'); continue; }
           if (lower === '.ادوات') {
@@ -111,7 +113,7 @@ async function startBot() {
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ ادوات اضافية ⚙️\n';
-            menu += '• .ابيض + رقم\n• .الغاء ابيض + رقم\n• .اضف بلاك + رقم\n• .الغاء بلاك + رقم\n• .بيضاء\n• .بلاك\n• .قائمة\n• .حذف / .حذف ابيض / .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .طرد - بالرد على رسالة\n• .معلومات\n• .ping\n\nMADE BY RAYMON';
+            menu += '• .ابيض + رقم\n• .الغاء ابيض + رقم\n• .اضف بلاك + رقم\n• .فك حظر + رقم  (يفك الحظر)\n• .بيضاء\n• .بلاك\n• .قائمة\n• .حذف - بالرد على رسالة تحذفها\n• .حذف القوائم - يمسح البيضاء والبلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .طرد - بالرد على رسالة\n• .معلومات\n• .ping\n\nMADE BY RAYMON';
             await reply(from, menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
@@ -133,28 +135,39 @@ async function startBot() {
           if ((lower === '.سكر' || lower === '.قفل') && isGroup) { try { await sock.groupSettingUpdate(from, 'announcement'); await reply(from, '🔒 سكرت القروب'); } catch {} continue; }
           if (lower === '.قفل الروابط') { lockLinks = true; saveLists(); await reply(from, '🔗 قفلت الروابط'); continue; }
           if (lower === '.فتح الروابط') { lockLinks = false; saveLists(); await reply(from, '🔗 فتحت الروابط'); continue; }
-          if (lower === '.حذف') { whiteList = []; blackList = []; saveLists(); await reply(from, '✅ مسحت البيضاء والبلاك كلهم'); continue; }
+          if (lower === '.حذف' && isGroup) {
+            if (quotedKey) { await deleteMsg(from, quotedKey); await reply(from, '✅ حذفت الرسالة'); }
+            else { await reply(from, '⚠️ رد على الرسالة اللي تبي تحذفها واكتب .حذف'); }
+            continue;
+          }
+          if (lower === '.حذف القوائم' || lower === '.حذف الكل') { whiteList = []; blackList = []; saveLists(); await reply(from, '✅ مسحت البيضاء والبلاك كلهم'); continue; }
+          if (lower === '.حذف ابيض') { whiteList = []; saveLists(); await reply(from, '✅ مسحت البيضاء كلها'); continue; }
+          if (lower === '.حذف بلاك') { blackList = []; saveLists(); await reply(from, '✅ مسحت البلاك كله'); continue; }
           if (lower.startsWith('.طرد')) {
-            if (!isGroup) { await reply(from, '⚠️ .طرد يخدم في القروب بس، دير رد على رسالة الشخص'); continue; }
+            if (!isGroup) { await reply(from, '⚠️ .طرد يخدم في القروب بس'); continue; }
             let target = null;
-            if (replyTo) target = replyTo;
-            else {
-              let n = norm(text);
-              if (n) target = n + '@s.whatsapp.net';
-            }
-            if (target && !isOwner(norm(target))) {
+            if (quotedParticipant) target = quotedParticipant;
+            else { let n = norm(text); if (n && n.length > 5) target = n + '@s.whatsapp.net'; }
+            if (target) {
               await kickUser(from, target);
               if (!blackList.includes(norm(target))) { blackList.push(norm(target)); saveLists(); }
-              await reply(from, '🚨 طردت ' + norm(target));
+              await reply(from, '🚨 طردت ' + target.split('@')[0]);
             } else { await reply(from, '⚠️ رد على رسالة الشخص واكتب .طرد'); }
+            continue;
+          }
+          if (lower.startsWith('.فك حظر') || lower.startsWith('.الغاء حظر') || lower.startsWith('.الغاء بلاك') || lower === '.فك' || lower.startsWith('.فك ')) {
+            let targetNum = norm(text);
+            if (quotedParticipant) targetNum = norm(quotedParticipant);
+            if (targetNum) {
+              blackList = blackList.filter(x => x !== targetNum);
+              saveLists();
+              await reply(from, '✅ فكيت الحظر على: ' + targetNum);
+            } else { await reply(from, '⚠️ اكتب .فك حظر + رقم، ولا رد على رسالته واكتب .فك حظر'); }
             continue;
           }
           if (lower.startsWith('.ابيض')) { let n = norm(text); if (n) { if (!whiteList.includes(n)) whiteList.push(n); saveLists(); await reply(from, '✅ ضفته للبيضاء: ' + n); } continue; }
           if (lower.startsWith('.الغاء ابيض')) { let n = norm(text); whiteList = whiteList.filter(x => x !== n); saveLists(); await reply(from, '✅ نحيته من البيضاء: ' + n); continue; }
           if (lower.startsWith('.اضف بلاك')) { let n = norm(text); if (n) { if (!blackList.includes(n)) blackList.push(n); saveLists(); await reply(from, '✅ ضفته للبلاك: ' + n); } continue; }
-          if (lower.startsWith('.الغاء بلاك')) { let n = norm(text); blackList = blackList.filter(x => x !== n); saveLists(); await reply(from, '✅ نحيته من البلاك: ' + n); continue; }
-          if (lower.startsWith('.حذف ابيض')) { whiteList = []; saveLists(); await reply(from, '✅ مسحت البيضاء كلها'); continue; }
-          if (lower.startsWith('.حذف بلاك')) { blackList = []; saveLists(); await reply(from, '✅ مسحت البلاك كله'); continue; }
           continue;
         }
         if (!isGroup) continue;
@@ -172,7 +185,6 @@ async function startBot() {
           await deleteMsg(from, m.key);
           await kickUser(from, sender);
           await reply(from, '🚨 طردت ' + senderNum + ' السبب: إعادة توجيه');
-          await notifyOwner('🚨 طردت ' + senderNum + ' السبب: إعادة توجيه');
           continue;
         }
         if (hasLink(text)) {
