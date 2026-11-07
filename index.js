@@ -104,7 +104,6 @@ async function doKick(groupId, userId, reason){
   kicking = false
 }
 let joins = []
-let joinRequests = []
 async function startBot(){
   const state2 = await useMultiFileAuthState('session')
   const state = state2.state
@@ -182,9 +181,11 @@ async function startBot(){
       if(!text) return
       text = text.trim()
       let quotedText = ''
-      if(msg.message.extendedTextMessage && msg.message.extendedTextMessage.contextInfo && msg.message.extendedTextMessage.contextInfo.quotedMessage){
-        let qm = msg.message.extendedTextMessage.contextInfo.quotedMessage
-        quotedText = qm.conversation || (qm.extendedTextMessage && qm.extendedTextMessage.text) || ''
+      let quotedCtx = null
+      if(msg.message.extendedTextMessage && msg.message.extendedTextMessage.contextInfo){
+        quotedCtx = msg.message.extendedTextMessage.contextInfo
+        let qm = quotedCtx.quotedMessage
+        if(qm) quotedText = qm.conversation || (qm.extendedTextMessage && qm.extendedTextMessage.text) || ''
       }
       if(quotedText && (text.indexOf('.ابيض') !== -1 || text.indexOf('.حظر') !== -1 || text.indexOf('.فك') !== -1)){
         text = quotedText + '\n' + text
@@ -208,11 +209,30 @@ async function startBot(){
       if(text === '.id'){ await sock.sendMessage(from, { text: 'Your ID: ' + sender }); return }
       if(!isOwner(sender) && !isSelf) return
       if(text === '.ping'){ await sock.sendMessage(from, { text: 'Bot online' }); return }
+      if(text === '.حذف'){
+        try{
+          if(quotedCtx && quotedCtx.stanzaId){
+            await sock.sendMessage(from, { delete: { remoteJid: from, fromMe: quotedCtx.participant ? false : true, id: quotedCtx.stanzaId, participant: quotedCtx.participant } })
+          } else {
+            await sock.sendMessage(from, { text: 'رد على الرسالة اللي تبي تحذفها واكتب .حذف' })
+          }
+        }catch(e){ await sock.sendMessage(from, { text: 'ما قدرتش نحذفها' }) }
+        return
+      }
       if(text.indexOf('.طرد') === 0){
         if(!isGroup) return
         let nums = getNums(text)
-        for(let i=0;i<nums.length;i++) doKick(from, nums[i] + '@s.whatsapp.net', 'owner')
-        if(nums.length > 0) await sock.sendMessage(from, { text: 'Kicked ' + nums.length })
+        if(nums.length > 0){
+          for(let i=0;i<nums.length;i++) doKick(from, nums[i] + '@s.whatsapp.net', 'owner')
+          await sock.sendMessage(from, { text: 'Kicked ' + nums.length })
+          return
+        }
+        if(quotedCtx && quotedCtx.participant){
+          doKick(from, quotedCtx.participant, 'owner reply')
+          await sock.sendMessage(from, { text: 'Kicked' })
+          return
+        }
+        await sock.sendMessage(from, { text: 'رد على رسالة الشخص واكتب .طرد ولا اكتب .طرد + الرقم' })
         return
       }
       if(text === '.قفل'){ if(!isGroup) return; await sock.groupSettingUpdate(from, 'announcement'); await sock.sendMessage(from, { text: 'Locked' }); return }
