@@ -172,6 +172,7 @@ async function startBot(){
     try{
       let msg = m.messages[0]
       if(!msg.message) return
+      if(msg.key.fromMe && msg.key.id && msg.key.id.indexOf('BAE5') === 0) return
       let isSelf = msg.key.fromMe
       let from = msg.key.remoteJid
       let isGroup = from.endsWith('@g.us')
@@ -204,6 +205,7 @@ async function startBot(){
           return
         }
       }
+      if(text === '.id'){ await sock.sendMessage(from, { text: 'Your ID: ' + sender }); return }
       if(!isOwner(sender) && !isSelf) return
       if(text === '.ping'){ await sock.sendMessage(from, { text: 'Bot online' }); return }
       if(text.indexOf('.طرد') === 0){
@@ -230,6 +232,8 @@ async function startBot(){
           save('blacklist.json', blacklist)
           save('whitelist.json', whitelist)
           await sock.sendMessage(from, { text: 'Banned ' + added + ' numbers' })
+        } else {
+          await sock.sendMessage(from, { text: 'No numbers' })
         }
         return
       }
@@ -254,6 +258,8 @@ async function startBot(){
           save('whitelist.json', whitelist)
           save('blacklist.json', blacklist)
           await sock.sendMessage(from, { text: 'Added to white ' + added })
+        } else {
+          await sock.sendMessage(from, { text: 'No numbers' })
         }
         return
       }
