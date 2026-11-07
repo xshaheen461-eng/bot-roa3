@@ -4,6 +4,9 @@ const express = require('express')
 const fs = require('fs')
 const qrcode = require('qrcode')
 
+process.on('uncaughtException', e => console.log('uncaught', e.message))
+process.on('unhandledRejection', e => console.log('unhandled', e.message))
+
 const app = express()
 let qrCode = ''
 let sock = null
@@ -22,8 +25,14 @@ const BOT_NUMBER = (process.env.BOT_NUMBER || "").replace(/\D/g, '')
 
 function load(f, def) { try { if (fs.existsSync(f)) return JSON.parse(fs.readFileSync(f)) } catch(e){} return def }
 function save(f, d) { fs.writeFileSync(f, JSON.stringify(d)) }
-let whitelist = load('whitelist.json', [])
-let blacklist = load('blacklist.json', [])
+
+// ===== تصليح مهم: حول كل شي لنص باش slice ما يطيحش =====
+function normalizeList(arr) {
+  if (!Array.isArray(arr)) return []
+  return [...new Set(arr.map(x => String(x).replace(/\D/g, '')).filter(x => x.length >= 8))]
+}
+let whitelist = normalizeList(load('whitelist.json', []))
+let blacklist = normalizeList(load('blacklist.json', []))
 let reports = load('report-history.json', {})
 let bannedWords = load('banned.json', [])
 
@@ -31,21 +40,20 @@ const ALLOWED_CODES = ['218','20','212','213','216','222','249','211','252','253
 
 function getLastDigits(jid) {
   if (!jid) return ''
-  let d = jid.replace(/\D/g, '')
+  let d = String(jid).replace(/\D/g, '')
   return d.slice(-9)
 }
 function isOwner(jid) {
   if (!jid) return false
-  if (OWNER_LID && jid.includes(OWNER_LID)) return true
-  if (jid.includes('@lid')) return false
-  let d = jid.replace(/\D/g, '')
+  if (OWNER_LID && String(jid).includes(OWNER_LID)) return true
+  if (String(jid).includes('@lid')) return false
+  let d = String(jid).replace(/\D/g, '')
   if (!OWNER_NUMBER) return false
   return d.includes(OWNER_NUMBER) || d.endsWith(OWNER_NUMBER.slice(-9))
 }
 function getNums(text) {
   if (!text) return []
-  let matches = text.match(/\d{8,15}/g) || []
-  // نخزن الرقم كامل كيف ما بعته انت، مش اخر 9 بس، باش يطلع في القائمة كامل
+  let matches = String(text).match(/\d{8,15}/g) || []
   let out = [...new Set(matches)]
   return out.filter(n => n.length >= 😎
 }
@@ -55,22 +63,22 @@ function getNum(text) {
 }
 function isInList(list, jid) {
   let last = getLastDigits(jid)
-  return list.some(x => x.slice(-9) === last || last.endsWith(x.slice(-9)) || x.endsWith(last))
+  return list.some(x => String(x).slice(-9) === last || last.endsWith(String(x).slice(-9)) || String(x).endsWith(last))
 }
 function isAllowedNumber(jid) {
   if (!jid) return false
-  if (jid.includes('@lid')) return true
-  let d = jid.replace(/\D/g, '')
+  if (String(jid).includes('@lid')) return true
+  let d = String(jid).replace(/\D/g, '')
   for (let c of ALLOWED_CODES) { if (d.startsWith(c)) return true }
   return false
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-// ===== تنسيق القوائم الجديد - كيف ما تبي انت =====
 function formatBlacklist() {
   if (blacklist.length === 0) return '🚫 البلاك (0):\nفاضية'
   let txt = '🚫 البلاك (' + blacklist.length + '):\n\n'
   blacklist.forEach((n, i) => {
+    n = String(n)
     txt += (i+1) + '. 👤 مبند ' + n.slice(-6) + '\n   📞 `' + n + '`\n\n'
   })
   return txt.trim()
@@ -79,6 +87,7 @@ function formatWhitelist() {
   if (whitelist.length === 0) return '✅ البيضاء (0):\nفاضية'
   let txt = '✅ البيضاء (' + whitelist.length + '):\n\n'
   whitelist.forEach((n, i) => {
+    n = String(n)
     txt += (i+1) + '. 👤 مسموح ' + n.slice(-6) + '\n   📞 `' + n + '`\n\n'
   })
   return txt.trim()
@@ -134,7 +143,7 @@ async function startBot() {
       let participants = anu.participants || []
       if (action === 'demote') {
         for (let p of participants) {
-          if (p.includes(BOT_NUMBER) || getLastDigits(p) === BOT_NUMBER.slice(-9)) {
+          if (String(p).includes(BOT_NUMBER) || getLastDigits(p) === BOT_NUMBER.slice(-9)) {
             let actor = anu.author || ''
             if (!isOwner(actor)) await sock.groupParticipantsUpdate(groupId, [actor], 'remove')
           }
@@ -187,10 +196,10 @@ async function startBot() {
       let from = msg.key.remoteJid
       let isGroup = from.endsWith('@g.us')
       let sender = msg.key.participant || msg.key.remoteJidAlt || msg.key.remoteJid
-      if (sender.includes('@lid') && msg.key.remoteJidAlt) sender = msg.key.remoteJidAlt
-      if (msg.key.participant && msg.key.participant.includes('@lid')) {
+      if (String(sender).includes('@lid') && msg.key.remoteJidAlt) sender = msg.key.remoteJidAlt
+      if (msg.key.participant && String(msg.key.participant).includes('@lid')) {
         sender = msg.key.participant
-        if (msg.key.remoteJidAlt && !msg.key.remoteJidAlt.includes('@lid')) sender = msg.key.remoteJidAlt
+        if (msg.key.remoteJidAlt && !String(msg.key.remoteJidAlt).includes('@lid')) sender = msg.key.remoteJidAlt
       }
       let text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || ''
       if (!text) return
@@ -208,7 +217,7 @@ async function startBot() {
         return
       }
       let lower = text.toLowerCase()
-      if (lower.includes('.band') || text.includes('تبنيد') || text.includes('باند') || text.includes('فنش') || text.includes('تفجير') || bannedWords.some(w => lower.includes(w.toLowerCase()))) {
+      if (lower.includes('.band') || text.includes('تبنيد') || text.includes('باند') || text.includes('فنش') || text.includes('تفجير') || bannedWords.some(w => lower.includes(String(w).toLowerCase()))) {
         if (isGroup && !isOwner(sender) && !isSelf) {
           try { await sock.sendMessage(from, { delete: msg.key }) } catch(e){}
           doKick(from, sender, 'كلمة تبنيد')
@@ -250,14 +259,14 @@ async function startBot() {
         await sock.sendMessage(from, { text: 'تم فتح القروب' })
         return
       }
-      // ===== حظر جماعي =====
       if (text.includes('.حظر') || text.includes('.حضر')) {
         let nums = getNums(text)
         if (nums.length > 0) {
           let added = 0
           for (let full of nums) {
-            if (!blacklist.some(x => x.slice(-9) === full.slice(-9))) { blacklist.push(full); added++ }
-            whitelist = whitelist.filter(x => x.slice(-9) !== full.slice(-9))
+            full = String(full)
+            if (!blacklist.some(x => String(x).slice(-9) === full.slice(-9))) { blacklist.push(full); added++ }
+            whitelist = whitelist.filter(x => String(x).slice(-9) !== full.slice(-9))
             if (isGroup) doKick(from, full + '@s.whatsapp.net', 'حظر جماعي')
           }
           save('blacklist.json', blacklist)
@@ -268,29 +277,28 @@ async function startBot() {
         }
         return
       }
-      // ===== فك جماعي =====
       if (text.includes('.فك')) {
         let nums = getNums(text)
         if (nums.length > 0) {
-          for (let full of nums) blacklist = blacklist.filter(x => x.slice(-9) !== full.slice(-9))
+          for (let full of nums) blacklist = blacklist.filter(x => String(x).slice(-9) !== String(full).slice(-9))
           save('blacklist.json', blacklist)
           await sock.sendMessage(from, { text: 'تم فك ' + nums.length + ' رقم' })
         }
         return
       }
-      // ===== بيضاء جماعي =====
       if (text.includes('.ابيض') || text.includes('.الغاء_ابيض')) {
         let nums = getNums(text)
         if (nums.length > 0) {
           if (text.includes('.الغاء_ابيض')) {
-            for (let full of nums) whitelist = whitelist.filter(x => x.slice(-9) !== full.slice(-9))
+            for (let full of nums) whitelist = whitelist.filter(x => String(x).slice(-9) !== String(full).slice(-9))
             save('whitelist.json', whitelist)
             await sock.sendMessage(from, { text: 'تم الغاء ' + nums.length + ' من البيضاء' })
           } else {
             let added = 0
             for (let full of nums) {
-              if (!whitelist.some(x => x.slice(-9) === full.slice(-9))) { whitelist.push(full); added++ }
-              blacklist = blacklist.filter(x => x.slice(-9) !== full.slice(-9))
+              full = String(full)
+              if (!whitelist.some(x => String(x).slice(-9) === full.slice(-9))) { whitelist.push(full); added++ }
+              blacklist = blacklist.filter(x => String(x).slice(-9) !== full.slice(-9))
             }
             save('whitelist.json', whitelist)
             save('blacklist.json', blacklist)
@@ -301,7 +309,6 @@ async function startBot() {
         }
         return
       }
-      // ===== القائمة - بالشكل الجديد =====
       if (text === '.قائمة' || text === '.قائمه' || text === '.list' || text === '.بيضاء' || text === 'بيضاء') {
         let banned = bannedWords.length > 0 ? bannedWords.join(', ') : 'فاضية'
         let rep = Object.keys(reports).length > 0 ? Object.entries(reports).map(([k,v]) => k + ' (' + v + ')').join(', ') : 'فاضية'
@@ -321,7 +328,7 @@ async function startBot() {
         if (!isGroup) return
         let nums = getNums(text)
         for (let full of nums) {
-          let last = full.slice(-9)
+          let last = String(full).slice(-9)
           reports[last] = (reports[last] || 0) + 1
           if (reports[last] >= 4) doKick(from, full + '@s.whatsapp.net', '4 بلاغات')
         }
@@ -343,6 +350,7 @@ async function startBot() {
 
   setInterval(async () => {
     try {
+      if (!sock) return
       let groups = await sock.groupFetchAllParticipating()
       for (let gid in groups) {
         let g = groups[gid]
@@ -355,7 +363,7 @@ async function startBot() {
           }
         }
       }
-    } catch(e){}
+    } catch(e){ console.log('interval err', e.message) }
   }, 30 * 60 * 1000)
 }
 
