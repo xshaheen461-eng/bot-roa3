@@ -1,4 +1,4 @@
-// ====== بوت حماية - صامت في القروب + تقرير في خاص المالك + كشف روابط معدل ======
+// Bot Protection - Silent + Private Report + Anti Modified Link
 let _log = console.log
 console.log = (...a) => {
   let s = (a[0]||'').toString()
@@ -61,7 +61,7 @@ let whiteList = new Map()
 try{
   let data = load('whitelist.json', [])
   if(Array.isArray(data)){
-    if(data.length>0 && typeof data[0]==='string') data.forEach(j=>whiteList.set(j,{name:"قديم",time:""}))
+    if(data.length>0 && typeof data[0]==='string') data.forEach(j=>whiteList.set(j,{name:"old",time:""}))
     else whiteList = new Map(data)
   }
 }catch{}
@@ -74,7 +74,7 @@ function saveBlack(){ save('blacklist.json', [...blackList]) }
 function isBlack(jid){ if(!jid) return false; if(blackList.has(jid)) return true; let d=getLastDigits(jid); for(let [b] of blackList){ if(getLastDigits(b)===d) return true } return false }
 function addBlack(jid, name){
   if(!jid || isWhite(jid) || isOwner(jid)) return
-  if(!blackList.has(jid)) blackList.set(jid, {name: name||"طرد", time: new Date().toLocaleString()})
+  if(!blackList.has(jid)) blackList.set(jid, {name: name||"kick", time: new Date().toLocaleString()})
   saveBlack()
 }
 function findBlack(jid){ let d=getLastDigits(jid); for(let [b] of blackList){ if(b===jid || getLastDigits(b)===d) return b } return null }
