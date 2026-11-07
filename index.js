@@ -4,9 +4,8 @@ const qrcode = require('qrcode');
 const fs = require('fs');
 const pino = require('pino');
 const OWNER_NUMBER = (process.env.OWNER_NUMBER || '218920972444').replace(/[^0-9]/g,'');
-// حط هنا ID تجريبي و ID لوحة تحكم بعد ما تجيبهم بـ .ايدي
-const ALLOWED_GROUP = 'حط هنا ID تجريبي';
-const CONTROL_GROUP = 'حط هنا ID لوحة تحكم';
+// قروب المشرفين - يبعت فيه سبب الحظر والطرد بس
+const CONTROL_GROUP = '120363430679974162@g.us';
 const app = express();
 let qrCode = '';
 let sock = null;
@@ -31,8 +30,8 @@ let floodCount = {};
 let joinTimes = {};
 async function notifyOwner(text) {
   if (!sock) return;
-  const target = (CONTROL_GROUP && !CONTROL_GROUP.includes('حط هنا')) ? CONTROL_GROUP : ALLOWED_GROUP;
-  try { await sock.sendMessage(target, { text }); } catch {}
+  // التنبيهات تمشي لقروب المشرفين بس، مهما كان القروب اللي صار فيه الحظر
+  try { await sock.sendMessage(CONTROL_GROUP, { text }); } catch {}
 }
 async function reply(jid, text) {
   try { await sock.sendMessage(jid, { text }); } catch {}
@@ -60,7 +59,7 @@ async function startBot() {
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', (u) => {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
-    if (u.connection === 'open') { qrCode = ''; console.log('Bot connected'); notifyOwner('✅ البوت متصل - يخدم في تجريبي بس'); }
+    if (u.connection === 'open') { qrCode = ''; console.log('Bot connected'); notifyOwner('✅ البوت متصل - يخدم في كل القروبات'); }
     if (u.connection === 'close') {
       const should = (u.lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
       if (should) startBot();
@@ -70,7 +69,8 @@ async function startBot() {
     try {
       if (u.action !== 'add') return;
       const jid = u.id;
-      if (jid !== ALLOWED_GROUP) return;
+      // في قروب المشرفين ما نديرش حماية هجوم
+      if (jid === CONTROL_GROUP) return;
       if (!joinTimes[jid]) joinTimes[jid] = [];
       let now = Date.now();
       joinTimes[jid] = joinTimes[jid].filter(t => now - t < 30000);
@@ -84,7 +84,7 @@ async function startBot() {
           }
         }
         saveLists();
-        await notifyOwner('🚨 هجوم بوتات في تجريبي! سكرت القروب وطردتهم بصمت');
+        await notifyOwner('🚨 هجوم بوتات في قروب ' + jid + '! سكرت القروب وطردتهم بصمت');
         joinTimes[jid] = [];
       }
     } catch (e) { console.log('Raid Error:', e.message); }
@@ -95,14 +95,13 @@ async function startBot() {
         if (!m.message) continue;
         const from = m.key.remoteJid;
         const isGroup = from?.endsWith('@g.us');
-        // .ايدي يخدم في أي قروب باش نجيب الـ ID، حتى قبل ما نحط الـ ID
+        // .ايدي يخدم في أي قروب
         const _tmpText = m.message.conversation || m.message.extendedTextMessage?.text || '';
         if (_tmpText.trim() === '.ايدي') {
           try { await sock.sendMessage(from, { text: 'ID متع القروب:\n' + from }); } catch {}
           continue;
         }
-        // البوت يخدم في تجريبي ولوحة تحكم بس
-        if (isGroup && from !== ALLOWED_GROUP && from !== CONTROL_GROUP) continue;
+        // البوت يخدم في كل القروبات، ما فيش قروب ممنوع
         const sender = m.key.participant || m.key.remoteJid;
         const senderNum = norm(sender);
         const isOwnerSender = isOwner(senderNum) || m.key.fromMe || sender === OWNER_NUMBER + '@s.whatsapp.net';
@@ -117,13 +116,13 @@ async function startBot() {
         const quotedKey = ctx?.stanzaId ? { remoteJid: from, id: ctx.stanzaId, participant: quotedParticipant, fromMe: false } : null;
         if (isOwnerSender) {
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
-          if (lower === '.ping') { await reply(from, '✅ Bot online - يخدم في تجريبي بس'); continue; }
+          if (lower === '.ping') { await reply(from, '✅ Bot online - يخدم في كل القروبات'); continue; }
           if (lower === '.ادوات') {
             let menu = '╭─── 🍷 ───╮\n';
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ 👻 الوضع: مخفي - يخدم في تجريبي بس\n';
+            menu += '│ 👻 الوضع: يخدم في كل القروبات\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
             menu += '• .ايدي - يطلع ID القروب\n';
@@ -152,7 +151,7 @@ async function startBot() {
           if (lower === '.قفل الروابط') { lockLinks = true; saveLists(); await reply(from, '🔗 قفلت الروابط'); continue; }
           if (lower === '.فتح الروابط') { lockLinks = false; saveLists(); await reply(from, '🔗 فتحت الروابط'); continue; }
           if (lower === '.حذف' && isGroup) {
-            if (quotedKey) { await deleteMsg(from, quotedKey); await notifyOwner('✅ تم الحذف - حذفت الرسالة بصمت'); }
+            if (quotedKey) { await deleteMsg(from, quotedKey); await notifyOwner('✅ تم الحذف في قروب ' + from + ' - حذفت الرسالة بصمت'); }
             else { await reply(from, '⚠️ رد على الرسالة اللي تبي تحذفها واكتب .حذف'); }
             continue;
           }
@@ -167,7 +166,7 @@ async function startBot() {
             if (target) {
               await kickUser(from, target);
               if (!blackList.includes(norm(target))) { blackList.push(norm(target)); saveLists(); }
-              await notifyOwner('🚨 طردت ' + target.split('@')[0] + '\nالسبب: أمر منك .طرد');
+              await notifyOwner('🚨 طردت ' + target.split('@')[0] + ' من قروب ' + from + '\nالسبب: أمر منك .طرد');
             } else { await reply(from, '⚠️ رد على رسالة الشخص واكتب .طرد'); }
             continue;
           }
@@ -197,38 +196,39 @@ async function startBot() {
           continue;
         }
         if (!isGroup) continue;
-        if (from !== ALLOWED_GROUP) continue;
+        // في قروب المشرفين ما نديروش حماية تلقائية، باش ما نطردوش المشرفين
+        if (from === CONTROL_GROUP) continue;
         if (isWhiteSender) continue;
-        if (isBlackSender) { await deleteMsg(from, m.key); await kickUser(from, sender); await notifyOwner('🚨 طردت ' + senderNum + '\nالسبب: في البلاك'); continue; }
+        if (isBlackSender) { await deleteMsg(from, m.key); await kickUser(from, sender); await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: في البلاك'); continue; }
         if (BAN_WORDS.some(w => lower.includes(w))) {
           await deleteMsg(from, m.key);
           if (!blackList.includes(senderNum)) { blackList.push(senderNum); saveLists(); }
           await kickUser(from, sender);
-          await notifyOwner('🚨 طردت ' + senderNum + '\nالسبب: كلمة تبنيد / تخريب / هكر');
+          await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: كلمة تبنيد / تخريب / هكر');
           continue;
         }
         if (isForward) {
           await deleteMsg(from, m.key);
           await kickUser(from, sender);
-          await notifyOwner('🚨 طردت ' + senderNum + '\nالسبب: إعادة توجيه');
+          await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: إعادة توجيه');
           continue;
         }
         if (hasLink(text)) {
           if (lockLinks) {
             await deleteMsg(from, m.key);
             await kickUser(from, sender);
-            await notifyOwner('🚨 طردت ' + senderNum + '\nالسبب: الروابط مقفولة');
+            await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: الروابط مقفولة');
             continue;
           }
           await deleteMsg(from, m.key);
           linkCount[senderNum] = (linkCount[senderNum] || 0) + 1;
           if (linkCount[senderNum] >= 2) {
             await kickUser(from, sender);
-            await notifyOwner('🚨 طردت ' + senderNum + '\nالسبب: رابط مكرر');
+            await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: رابط مكرر');
             linkCount[senderNum] = 0;
           } else {
             await lockGroup(from);
-            await notifyOwner('🔒 سكرت القروب 5 دقايق\nالسبب: ' + senderNum + ' بعت رابط');
+            await notifyOwner('🔒 سكرت القروب ' + from + ' 5 دقايق\nالسبب: ' + senderNum + ' بعت رابط');
           }
           continue;
         }
@@ -239,7 +239,7 @@ async function startBot() {
           stickerCount[senderNum].push(now);
           if (stickerCount[senderNum].length > 2) {
             await deleteMsg(from, m.key);
-            await notifyOwner('🧹 حذفت ملصق سبام من ' + senderNum);
+            await notifyOwner('🧹 حذفت ملصق سبام من ' + senderNum + ' في قروب ' + from);
             continue;
           }
         }
@@ -249,7 +249,7 @@ async function startBot() {
         floodCount[senderNum].push(now2);
         if (floodCount[senderNum].length > 5) {
           await deleteMsg(from, m.key);
-          await notifyOwner('🧹 حذفت فيضان من ' + senderNum);
+          await notifyOwner('🧹 حذفت فيضان من ' + senderNum + ' في قروب ' + from);
         }
       } catch (e) { console.log('Error:', e.message); }
     }
