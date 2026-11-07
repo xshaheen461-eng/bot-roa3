@@ -4,7 +4,9 @@ const qrcode = require('qrcode');
 const fs = require('fs');
 const pino = require('pino');
 const OWNER_NUMBER = (process.env.OWNER_NUMBER || '218920972444').replace(/[^0-9]/g,'');
-const STEALTH = true;
+// حط هنا ID تجريبي و ID لوحة تحكم بعد ما تجيبهم بـ .ايدي
+const ALLOWED_GROUP = 'حط هنا ID تجريبي';
+const CONTROL_GROUP = 'حط هنا ID لوحة تحكم';
 const app = express();
 let qrCode = '';
 let sock = null;
@@ -28,11 +30,13 @@ let stickerCount = {};
 let floodCount = {};
 let joinTimes = {};
 async function notifyOwner(text) {
+  // التنبيهات التلقائية تمشي للوحة تحكم بس، مش للتجريبي، باش يكون مخفي
   if (!sock) return;
-  try { await sock.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', { text }); } catch {}
+  const target = (CONTROL_GROUP && !CONTROL_GROUP.includes('حط هنا')) ? CONTROL_GROUP : ALLOWED_GROUP;
+  try { await sock.sendMessage(target, { text }); } catch {}
 }
 async function reply(jid, text) {
-  if (STEALTH) { await notifyOwner(text); return; }
+  // رد أوامرك يجي في نفس المكان اللي بعت منه، ويطلع باسم "انت"
   try { await sock.sendMessage(jid, { text }); } catch {}
 }
 async function lockGroup(jid) {
@@ -58,7 +62,7 @@ async function startBot() {
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', (u) => {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
-    if (u.connection === 'open') { qrCode = ''; console.log('Bot connected'); notifyOwner('✅ البوت متصل - وضع التخفي شغال'); }
+    if (u.connection === 'open') { qrCode = ''; console.log('Bot connected'); notifyOwner('✅ البوت متصل - يخدم في تجريبي بس'); }
     if (u.connection === 'close') {
       const should = (u.lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
       if (should) startBot();
@@ -68,6 +72,7 @@ async function startBot() {
     try {
       if (u.action !== 'add') return;
       const jid = u.id;
+      if (jid !== ALLOWED_GROUP) return;
       if (!joinTimes[jid]) joinTimes[jid] = [];
       let now = Date.now();
       joinTimes[jid] = joinTimes[jid].filter(t => now - t < 30000);
@@ -81,7 +86,7 @@ async function startBot() {
           }
         }
         saveLists();
-        await notifyOwner('🚨 هجوم بوتات! سكرت القروب وطردتهم بصمت');
+        await notifyOwner('🚨 هجوم بوتات في تجريبي! سكرت القروب وطردتهم بصمت');
         joinTimes[jid] = [];
       }
     } catch (e) { console.log('Raid Error:', e.message); }
@@ -92,6 +97,8 @@ async function startBot() {
         if (!m.message) continue;
         const from = m.key.remoteJid;
         const isGroup = from?.endsWith('@g.us');
+        // البوت يخدم في تجريبي ولوحة تحكم بس
+        if (isGroup && from !== ALLOWED_GROUP && from !== CONTROL_GROUP) continue;
         const sender = m.key.participant || m.key.remoteJid;
         const senderNum = norm(sender);
         const isOwnerSender = isOwner(senderNum) || m.key.fromMe || sender === OWNER_NUMBER + '@s.whatsapp.net';
@@ -105,16 +112,21 @@ async function startBot() {
         const quotedParticipant = ctx?.participant;
         const quotedKey = ctx?.stanzaId ? { remoteJid: from, id: ctx.stanzaId, participant: quotedParticipant, fromMe: false } : null;
         if (isOwnerSender) {
-          if (lower === '.ping') { await reply(from, '✅ Bot online - وضع التخفي'); continue; }
+          if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
+          if (lower === '.ping') { await reply(from, '✅ Bot online - يخدم في تجريبي بس'); continue; }
           if (lower === '.ادوات') {
             let menu = '╭─── 🍷 ───╮\n';
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ 👻 الوضع: تخفي - ما حد يعرف\n';
+            menu += '│ 👻 الوضع: مخفي - يخدم في تجريبي بس\n';
             menu += '╰─── 🍷 ───╯\n\n';
-            menu += '⚙️ اوامر سرية ⚙️\n';
-            menu += '• .ابيض + رقم\n• .الغاء ابيض + رقم\n• .اضف بلاك + رقم\n• .فك حظر + رقم\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف القوائم\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .طرد - رد على رسالة\n• .معلومات\n• .ping';
+            menu += '⚙️ اوامر ⚙️\n';
+            menu += '• .ايدي - يطلع ID القروب\n';
+            menu += '• .ابيض + رقم\n• .الغاء ابيض + رقم\n';
+            menu += '• .حظر - بالرد على رسالة\n• .فك حظر + رقم\n';
+            menu += '• .بيضاء / .بلاك / .قائمة\n';
+            menu += '• .حذف - رد على رسالة تحذفها\n• .حذف القوائم\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .طرد - رد على رسالة\n• .معلومات\n• .ping';
             await reply(from, menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
@@ -137,14 +149,14 @@ async function startBot() {
           if (lower === '.فتح الروابط') { lockLinks = false; saveLists(); await reply(from, '🔗 فتحت الروابط'); continue; }
           if (lower === '.حذف' && isGroup) {
             if (quotedKey) { await deleteMsg(from, quotedKey); await notifyOwner('✅ تم الحذف - حذفت الرسالة بصمت'); }
-            else { await notifyOwner('⚠️ رد على الرسالة اللي تبي تحذفها واكتب .حذف'); }
+            else { await reply(from, '⚠️ رد على الرسالة اللي تبي تحذفها واكتب .حذف'); }
             continue;
           }
           if (lower === '.حذف القوائم' || lower === '.حذف الكل') { whiteList = []; blackList = []; saveLists(); await reply(from, '✅ مسحت البيضاء والبلاك كلهم'); continue; }
           if (lower === '.حذف ابيض') { whiteList = []; saveLists(); await reply(from, '✅ مسحت البيضاء كلها'); continue; }
           if (lower === '.حذف بلاك') { blackList = []; saveLists(); await reply(from, '✅ مسحت البلاك كله'); continue; }
           if (lower.startsWith('.طرد')) {
-            if (!isGroup) { await notifyOwner('⚠️ .طرد يخدم في القروب بس'); continue; }
+            if (!isGroup) { await reply(from, '⚠️ .طرد يخدم في القروب بس'); continue; }
             let target = null;
             if (quotedParticipant) target = quotedParticipant;
             else { let n = norm(text); if (n && n.length > 5) target = n + '@s.whatsapp.net'; }
@@ -152,7 +164,17 @@ async function startBot() {
               await kickUser(from, target);
               if (!blackList.includes(norm(target))) { blackList.push(norm(target)); saveLists(); }
               await notifyOwner('🚨 طردت ' + target.split('@')[0] + '\nالسبب: أمر منك .طرد');
-            } else { await notifyOwner('⚠️ رد على رسالة الشخص واكتب .طرد'); }
+            } else { await reply(from, '⚠️ رد على رسالة الشخص واكتب .طرد'); }
+            continue;
+          }
+          if (lower.startsWith('.حظر')) {
+            let n = norm(text);
+            if (quotedParticipant) n = norm(quotedParticipant);
+            if (n) {
+              if (!blackList.includes(n)) blackList.push(n);
+              saveLists();
+              await reply(from, '🚫 حظرت: ' + n);
+            } else { await reply(from, '⚠️ اكتب .حظر + رقم، ولا رد على رسالته واكتب .حظر'); }
             continue;
           }
           if (lower.startsWith('.فك حظر') || lower.startsWith('.الغاء حظر') || lower.startsWith('.الغاء بلاك') || lower === '.فك' || lower.startsWith('.فك ')) {
@@ -171,6 +193,7 @@ async function startBot() {
           continue;
         }
         if (!isGroup) continue;
+        if (from !== ALLOWED_GROUP) continue;
         if (isWhiteSender) continue;
         if (isBlackSender) { await deleteMsg(from, m.key); await kickUser(from, sender); await notifyOwner('🚨 طردت ' + senderNum + '\nالسبب: في البلاك'); continue; }
         if (BAN_WORDS.some(w => lower.includes(w))) {
