@@ -186,9 +186,7 @@ async function startBot() {
     try {
       let msg = m.messages[0]
       if (!msg.message) return
-      // === التصليح الجديد هنا ===
-      // معاش نديرو return على fromMe، لان البوت على نفس رقمك
-      // وانت تبعت لنفسك باش تتحكم فيه
+      // تصليح fromMe - البوت على نفس رقمك
       let isSelf = msg.key.fromMe
       let from = msg.key.remoteJid
       let isGroup = from.endsWith('@g.us')
@@ -291,12 +289,8 @@ async function startBot() {
         return
       }
 
-      if (text.startsWith('.ابيض') || text.startsWith('.الغاء_ابيض') || text === 'بيضاء') {
+      if (text.startsWith('.ابيض') || text.startsWith('.الغاء_ابيض')) {
         let num = getNum(text)
-        if (text === 'بيضاء') {
-          await sock.sendMessage(from, { text: 'القائمة البيضاء: ' + whitelist.join(', ') })
-          return
-        }
         if (num) {
           let last = num.slice(-9)
           if (text.startsWith('.الغاء_ابيض')) {
@@ -308,6 +302,16 @@ async function startBot() {
           }
           save('whitelist.json', whitelist)
         }
+        return
+      }
+
+      // ===== القائمة الكاملة =====
+      if (text === '.قائمة' || text === '.قائمه' || text === '.list' || text === '.بيضاء' || text === 'بيضاء') {
+        let white = whitelist.length > 0 ? whitelist.join(', ') : 'فاضية'
+        let black = blacklist.length > 0 ? blacklist.join(', ') : 'فاضية'
+        let banned = bannedWords.length > 0 ? bannedWords.join(', ') : 'فاضية'
+        let rep = Object.keys(reports).length > 0 ? Object.entries(reports).map(([k,v]) => k + ' (' + v + ')').join(', ') : 'فاضية'
+        await sock.sendMessage(from, { text: '📋 *القوائم*\n\n✅ *بيضاء:*\n' + white + '\n\n⛔ *بلاك:*\n' + black + '\n\n🚫 *كلمات تبنيد:*\n' + banned + '\n\n⚠️ *بلاغات:*\n' + rep })
         return
       }
 
@@ -361,7 +365,7 @@ async function startBot() {
         }
       }
     } catch(e){}
-  }, 10 * 60 * 1000)
+  }, 30 * 60 * 1000)
 }
 
 startBot()
