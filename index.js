@@ -49,7 +49,6 @@ async function getGroupName(jid) {
     return groupNameCache[jid];
   } catch(e) { return jid; }
 }
-// --- مصلحة: توا تجيب اسم القروب صح ---
 async function notifyOwner(text) {
   if (!sock) return;
   try {
@@ -75,17 +74,19 @@ async function kickUser(jid, user) {
 async function deleteMsg(jid, key) {
   try { await sock.sendMessage(jid, { delete: key }); } catch(e) {}
 }
+// --- مصلحة: توا يلقى روحه أدمن صح بـ norm ---
 async function kickBlacklistedFromAllGroups() {
   if (!sock) return 0;
   let kicked = 0;
   try {
     const groups = await sock.groupFetchAllParticipating();
+    const myNum = norm(sock.user.id);
     for (let jid in groups) {
       if (jid === CONTROL_GROUP) continue;
       try {
         const meta = groups[jid];
         let me = null;
-        for (let p of meta.participants) { if (p.id === sock.user.id) me = p; }
+        for (let p of meta.participants) { if (norm(p.id) === myNum) me = p; }
         if (!me || !me.admin) continue;
         for (let p of meta.participants) {
           let n = norm(p.id);
