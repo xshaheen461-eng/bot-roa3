@@ -74,22 +74,22 @@ async function kickUser(jid, user) {
 async function deleteMsg(jid, key) {
   try { await sock.sendMessage(jid, { delete: key }); } catch(e) {}
 }
-// --- مصلحة: توا يلقى روحه أدمن صح بـ norm ---
+// --- مصلحة نهائيا: نقص :15 قبل norm ---
 async function kickBlacklistedFromAllGroups() {
   if (!sock) return 0;
   let kicked = 0;
   try {
     const groups = await sock.groupFetchAllParticipating();
-    const myNum = norm(sock.user.id);
+    const myNum = norm((sock.user.id || '').split(':')[0].split('@')[0]);
     for (let jid in groups) {
       if (jid === CONTROL_GROUP) continue;
       try {
         const meta = groups[jid];
         let me = null;
-        for (let p of meta.participants) { if (norm(p.id) === myNum) me = p; }
+        for (let p of meta.participants) { if (norm(p.id.split(':')[0].split('@')[0]) === myNum) me = p; }
         if (!me || !me.admin) continue;
         for (let p of meta.participants) {
-          let n = norm(p.id);
+          let n = norm(p.id.split(':')[0].split('@')[0]);
           if (isBlack(n) && !isOwner(n)) {
             await kickUser(jid, p.id);
             kicked++;
@@ -156,7 +156,7 @@ async function startBot() {
         const from = m.key.remoteJid;
         const isGroup = from && from.endsWith('@g.us');
         const sender = m.key.participant || m.key.remoteJid;
-        const senderNum = norm(sender);
+        const senderNum = norm((sender || '').split(':')[0].split('@')[0]);
         const text = m.message.conversation || (m.message.extendedTextMessage && m.message.extendedTextMessage.text) || (m.message.imageMessage && m.message.imageMessage.caption) || (m.message.videoMessage && m.message.videoMessage.caption) || '';
         if (m.key.fromMe) {
           let t = text.trim();
@@ -174,6 +174,26 @@ async function startBot() {
         if (isOwnerSender) {
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
           if (lower === '.ping') { await reply(from, '✅ Bot online - يخدم في كل القروبات'); continue; }
+          if (lower === '.تشخيص') {
+            try {
+              const groups = await sock.groupFetchAllParticipating();
+              const myNum2 = norm((sock.user.id || '').split(':')[0].split('@')[0]);
+              let total = Object.keys(groups).length;
+              let adminList = [];
+              let notAdminList = [];
+              for (let jid in groups) {
+                const meta = groups[jid];
+                let me2 = null;
+                for (let p of meta.participants) { if (norm(p.id.split(':')[0].split('@')[0]) === myNum2) me2 = p; }
+                let name = await getGroupName(jid);
+                if (me2 && me2.admin) adminList.push(name);
+                else notAdminList.push(name);
+              }
+              let msg = '🔍 تشخيص:\nرقمي: ' + myNum2 + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\n' + (adminList.length ? adminList.join('\n') : 'ولا قروب') + '\nمش أدمن في: ' + notAdminList.length + '\n' + (notAdminList.length ? notAdminList.join('\n') : 'مافيش') + '\nبلاك: ' + blackList.length;
+              await reply(from, msg);
+            } catch(e) { await reply(from, 'خطأ تشخيص: ' + e.message); }
+            continue;
+          }
           if (lower === '.ادوات') {
             let menu = '╭─── 🍷 ───╮\n';
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
@@ -182,7 +202,7 @@ async function startBot() {
             menu += '│ 👻 الوضع: يخدم في كل القروبات\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
-            menu += '• .ايدي\n• حظر جماعي: الصق أرقام + كلمة الأمر في الأخير\n• ابيض جماعي: الصق أرقام + كلمة الأمر في الأخير\n• فك حظر جماعي: الصق أرقام + كلمة الأمر في الأخير\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .طرد - رد على رسالة\n• .معلومات\n• .ping';
+            menu += '• .ايدي\n• .تشخيص\n• حظر جماعي: الصق أرقام + كلمة الأمر في الأخير\n• ابيض جماعي: الصق أرقام + كلمة الأمر في الأخير\n• فك حظر جماعي: الصق أرقام + كلمة الأمر في الأخير\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .طرد - رد على رسالة\n• .معلومات\n• .ping';
             await reply(from, menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
@@ -213,14 +233,14 @@ async function startBot() {
             else { let nums = extractAllNumbers(text); if (nums.length) target = nums[0] + '@s.whatsapp.net'; }
             if (target) {
               await kickUser(from, target);
-              if (blackList.indexOf(norm(target)) === -1) { blackList.push(norm(target)); saveLists(); }
+              if (blackList.indexOf(norm(target.split(':')[0].split('@')[0])) === -1) { blackList.push(norm(target.split(':')[0].split('@')[0])); saveLists(); }
               await notifyOwner('🚨 طردت ' + target.split('@')[0] + ' من قروب ' + from);
             } else { await reply(from, '⚠️ رد على رسالة الشخص'); }
             continue;
           }
           if (lower.indexOf('.حظر') !== -1 || lower.indexOf('.اضف بلاك') !== -1) {
             let nums = [];
-            if (quotedParticipant) nums = [norm(quotedParticipant)];
+            if (quotedParticipant) nums = [norm(quotedParticipant.split(':')[0].split('@')[0])];
             else nums = extractAllNumbers(text);
             if (nums.length) {
               for (let n of nums) { if (blackList.indexOf(n) === -1) blackList.push(n); }
@@ -228,12 +248,13 @@ async function startBot() {
               await reply(from, '🚫 حظرت ' + nums.length + ' رقم\nتوا بنطردهم من كل القروبات اللي انت مشرف فيها');
               let k = await kickBlacklistedFromAllGroups();
               if (k > 0) await reply(from, '✅ طردت ' + k + ' واحد منهم كان قاعد جوا القروبات');
+              else await reply(from, 'ℹ️ ما لقيت حد منهم قاعد جوا القروبات توا، بس لو خش أي قروب بينطرد بروحه');
             } else { await reply(from, '⚠️ ابعت رقم ولا قائمة أرقام، وحط كلمة الأمر في الأخير'); }
             continue;
           }
           if (lower.indexOf('.فك حظر') !== -1 || lower.indexOf('.الغاء حظر') !== -1 || lower.indexOf('.الغاء بلاك') !== -1) {
             let nums = [];
-            if (quotedParticipant) nums = [norm(quotedParticipant)];
+            if (quotedParticipant) nums = [norm(quotedParticipant.split(':')[0].split('@')[0])];
             else nums = extractAllNumbers(text);
             if (nums.length) {
               for (let n of nums) blackList = blackList.filter((x) => x !== n);
