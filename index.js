@@ -20,6 +20,7 @@ const saveLists = () => {
   fs.writeFileSync('settings.json', JSON.stringify({ lockLinks }));
 };
 const norm = (s) => (s || '').replace(/[^0-9]/g,'');
+const getNum = (id) => norm((id || '').split(':')[0].split('@')[0]);
 const extractAllNumbers = (text) => {
   if (!text) return [];
   let clean = text.replace(/https?:\/\/\S+/g,'').replace(/chat\.whatsapp\.com\/\S+/g,'');
@@ -35,6 +36,27 @@ const extractAllNumbers = (text) => {
 const isOwner = (n) => norm(n) === OWNER_NUMBER;
 const isWhite = (n) => whiteList.indexOf(norm(n)) !== -1;
 const isBlack = (n) => blackList.indexOf(norm(n)) !== -1;
+// --- جديد: نجيب رقمك + LID متعك ---
+function getMyIds() {
+  if (!sock || !sock.user) return [OWNER_NUMBER];
+  let ids = [];
+  if (sock.user.id) ids.push(getNum(sock.user.id));
+  if (sock.user.lid) ids.push(getNum(sock.user.lid));
+  ids.push(OWNER_NUMBER);
+  return ids;
+}
+function isMe(p) {
+  let myIds = getMyIds();
+  let pid = getNum(p.id);
+  let pPhone = p.phoneNumber ? getNum(p.phoneNumber) : '';
+  let pLid = p.lid ? getNum(p.lid) : '';
+  return myIds.indexOf(pid) !== -1 || (pPhone && myIds.indexOf(pPhone) !== -1) || (pLid && myIds.indexOf(pLid) !== -1) || p.id === sock.user.id || p.id === sock.user.lid;
+}
+function getParticipantNum(p) {
+  // في القروبات الجديدة، الرقم الحقيقي يكون في phoneNumber، والـ id يكون LID
+  if (p.phoneNumber) return getNum(p.phoneNumber);
+  return getNum(p.id);
+}
 let linkCount = {};
 let stickerCount = {};
 let floodCount = {};
@@ -74,22 +96,21 @@ async function kickUser(jid, user) {
 async function deleteMsg(jid, key) {
   try { await sock.sendMessage(jid, { delete: key }); } catch(e) {}
 }
-// --- مصلحة نهائيا: نجيب الأدمن بـ groupMetadata مش من الكاش ---
+// --- خفيف: يستعمل الكاش بس، من غير groupMetadata لكل قروب ---
 async function kickBlacklistedFromAllGroups() {
   if (!sock) return 0;
   let kicked = 0;
   try {
     const groups = await sock.groupFetchAllParticipating();
-    const myNum = norm((sock.user.id || '').split(':')[0].split('@')[0]);
     for (let jid in groups) {
       if (jid === CONTROL_GROUP) continue;
       try {
-        const meta = await sock.groupMetadata(jid);
+        const meta = groups[jid];
         let me = null;
-        for (let p of meta.participants) { if (norm(p.id.split(':')[0].split('@')[0]) === myNum) me = p; }
+        for (let p of meta.participants) { if (isMe(p)) me = p; }
         if (!me || !me.admin) continue;
         for (let p of meta.participants) {
-          let n = norm(p.id.split(':')[0].split('@')[0]);
+          let n = getParticipantNum(p);
           if (isBlack(n) && !isOwner(n)) {
             await kickUser(jid, p.id);
             kicked++;
@@ -117,8 +138,8 @@ async function startBot() {
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
       notifyOwner('✅ البوت متصل - يخدم في كل القروبات');
-      setTimeout(() => { kickBlacklistedFromAllGroups(); }, 5000);
-      setInterval(() => { kickBlacklistedFromAllGroups(); }, 60*1000);
+      setTimeout(() => { kickBlacklistedFromAllGroups(); }, 8000);
+      setInterval(() => { kickBlacklistedFromAllGroups(); }, 5*60*1000);
     }
     if (u.connection === 'close') {
       const should = (u.lastDisconnect && u.lastDisconnect.error && u.lastDisconnect.error.output && u.lastDisconnect.error.output.statusCode) !== DisconnectReason.loggedOut;
@@ -137,9 +158,9 @@ async function startBot() {
       if (joinTimes[jid].length >= 3) {
         await lockGroup(jid);
         for (const p of u.participants) {
-          if (!isOwner(norm(p)) && !isWhite(norm(p))) {
+          if (!isOwner(getNum(p)) && !isWhite(getNum(p))) {
             await kickUser(jid, p);
-            if (blackList.indexOf(norm(p)) === -1) blackList.push(norm(p));
+            if (blackList.indexOf(getNum(p)) === -1) blackList.push(getNum(p));
           }
         }
         saveLists();
@@ -156,7 +177,7 @@ async function startBot() {
         const from = m.key.remoteJid;
         const isGroup = from && from.endsWith('@g.us');
         const sender = m.key.participant || m.key.remoteJid;
-        const senderNum = norm((sender || '').split(':')[0].split('@')[0]);
+        const senderNum = getNum(sender);
         const text = m.message.conversation || (m.message.extendedTextMessage && m.message.extendedTextMessage.text) || (m.message.imageMessage && m.message.imageMessage.caption) || (m.message.videoMessage && m.message.videoMessage.caption) || '';
         if (m.key.fromMe) {
           let t = text.trim();
@@ -177,21 +198,15 @@ async function startBot() {
           if (lower === '.تشخيص') {
             try {
               const groups = await sock.groupFetchAllParticipating();
-              const myNum2 = norm((sock.user.id || '').split(':')[0].split('@')[0]);
               let total = Object.keys(groups).length;
               let adminList = [];
-              let notAdminList = [];
               for (let jid in groups) {
-                try {
-                  const meta = await sock.groupMetadata(jid);
-                  let me2 = null;
-                  for (let p of meta.participants) { if (norm(p.id.split(':')[0].split('@')[0]) === myNum2) me2 = p; }
-                  let name = meta.subject || jid;
-                  if (me2 && me2.admin) adminList.push(name);
-                  else notAdminList.push(name);
-                } catch(e) { notAdminList.push(jid); }
+                const meta = groups[jid];
+                let me2 = null;
+                for (let p of meta.participants) { if (isMe(p)) me2 = p; }
+                if (me2 && me2.admin) adminList.push(meta.subject || jid);
               }
-              let msg = '🔍 تشخيص:\nرقمي: ' + myNum2 + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\n' + (adminList.length ? adminList.join('\n') : 'ولا قروب') + '\nمش أدمن في: ' + notAdminList.length + '\nبلاك: ' + blackList.length;
+              let msg = '🔍 تشخيص:\nرقمي: ' + OWNER_NUMBER + '\nLID: ' + (sock.user.lid ? getNum(sock.user.lid) : 'مافيش') + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\n' + (adminList.length ? adminList.join('\n') : 'ولا قروب') + '\nبلاك: ' + blackList.length;
               await reply(from, msg);
             } catch(e) { await reply(from, 'خطأ تشخيص: ' + e.message); }
             continue;
@@ -235,14 +250,14 @@ async function startBot() {
             else { let nums = extractAllNumbers(text); if (nums.length) target = nums[0] + '@s.whatsapp.net'; }
             if (target) {
               await kickUser(from, target);
-              if (blackList.indexOf(norm(target.split(':')[0].split('@')[0])) === -1) { blackList.push(norm(target.split(':')[0].split('@')[0])); saveLists(); }
-              await notifyOwner('🚨 طردت ' + target.split('@')[0] + ' من قروب ' + from);
+              if (blackList.indexOf(getNum(target)) === -1) { blackList.push(getNum(target)); saveLists(); }
+              await notifyOwner('🚨 طردت ' + getNum(target) + ' من قروب ' + from);
             } else { await reply(from, '⚠️ رد على رسالة الشخص'); }
             continue;
           }
           if (lower.indexOf('.حظر') !== -1 || lower.indexOf('.اضف بلاك') !== -1) {
             let nums = [];
-            if (quotedParticipant) nums = [norm(quotedParticipant.split(':')[0].split('@')[0])];
+            if (quotedParticipant) nums = [getNum(quotedParticipant)];
             else nums = extractAllNumbers(text);
             if (nums.length) {
               for (let n of nums) { if (blackList.indexOf(n) === -1) blackList.push(n); }
@@ -256,7 +271,7 @@ async function startBot() {
           }
           if (lower.indexOf('.فك حظر') !== -1 || lower.indexOf('.الغاء حظر') !== -1 || lower.indexOf('.الغاء بلاك') !== -1) {
             let nums = [];
-            if (quotedParticipant) nums = [norm(quotedParticipant.split(':')[0].split('@')[0])];
+            if (quotedParticipant) nums = [getNum(quotedParticipant)];
             else nums = extractAllNumbers(text);
             if (nums.length) {
               for (let n of nums) blackList = blackList.filter((x) => x !== n);
