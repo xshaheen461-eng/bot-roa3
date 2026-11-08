@@ -23,12 +23,15 @@ const norm = (s) => (s || '').replace(/[^0-9]/g,'');
 const getNum = (id) => norm((id || '').split(':')[0].split('@')[0]);
 const extractAllNumbers = (text) => {
   if (!text) return [];
-  let clean = text.replace(/https?:\/\/\S+/g,'').replace(/chat\.whatsapp\.com\/\S+/g,'');
-  let matches = clean.match(/[0-9]{7,15}/g) || [];
+  let clean = text.replace(/\+/g,'').replace(/-/g,'');
+  clean = clean.replace(/(\d)[\s\n]+(\d)/g, '$1$2');
+  clean = clean.replace(/(\d)[\s\n]+(\d)/g, '$1$2');
+  clean = clean.replace(/https?:\/\/\S+/g,'').replace(/chat\.whatsapp\.com\/\S+/g,'');
+  let matches = clean.match(/[0-9]{9,15}/g) || [];
   let out = [];
   for (let n of matches) {
     if (n.indexOf('12036') === 0) continue;
-    if (n.length < 7) continue;
+    if (n.length < 9) continue;
     if (out.indexOf(n) === -1) out.push(n);
   }
   return out;
@@ -67,17 +70,21 @@ function isWhiteParticipant(p) {
   for (let n of nums) if (isWhite(n)) return true;
   return false;
 }
-// خريطة LID -> رقم، باش البيضاء تتعرف على الزوز
 let lidMap = {};
 function linkLidToPhone(lid, phone) {
   if (!lid || !phone) return;
   lid = getNum(lid); phone = getNum(phone);
   if (lid === phone) return;
   lidMap[lid] = phone;
-  // لو التليفون في البيضاء، ضيف الـ LID بروحه للبيضاء
-  if (isWhite(phone) && !isWhite(lid)) { whiteList.push(lid); saveLists(); }
-  // لو التليفون في البلاك، نحي الـ LID من البلاك
-  if (isBlack(lid) && isWhite(phone)) { blackList = blackList.filter((x) => x !== lid); saveLists(); }
+}
+// يجيب الرقم من الرد + التاق + النص
+function getTargets(text, ctx, quotedParticipant) {
+  let nums = [];
+  let add = (n) => { n = getNum(n); if (n && nums.indexOf(n) === -1) nums.push(n); };
+  if (quotedParticipant) add(quotedParticipant);
+  if (ctx && ctx.mentionedJid) for (let j of ctx.mentionedJid) add(j);
+  for (let n of extractAllNumbers(text)) add(n);
+  return nums;
 }
 let linkCount = {};
 let stickerCount = {};
@@ -97,7 +104,6 @@ async function getGroupName(jid) {
 async function notifyOwner(text) {
   if (!sock) return;
   try {
-    // مانع السبام: نفس التنبيه ما يتكررش قبل 60 ثانية
     let key = text.split('\n')[0];
     let now = Date.now();
     if (lastKickNotify[key] && now - lastKickNotify[key] < 60000) return;
@@ -139,7 +145,6 @@ async function kickBlacklistedFromAllGroups() {
         for (let p of meta.participants) {
           let n = getParticipantNum(p);
           if (p.phoneNumber) linkLidToPhone(p.id, p.phoneNumber);
-          // --- جديد: المشرف ما ينطردش بكل ---
           if (p.admin) continue;
           if (isWhiteParticipant(p)) continue;
           if (isBlack(n) && !isOwner(n)) {
@@ -222,7 +227,7 @@ async function startBot() {
           if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0) continue;
         }
         const isOwnerSender = isOwner(senderNum) || isOwner(senderLid) || m.key.fromMe || sender === OWNER_NUMBER + '@s.whatsapp.net';
-        const isWhiteSender = isWhite(senderNum) || isWhite(senderLid) || (lidMap[senderLid] && isWhite(lidMap[senderLid])) || (lidMap[senderNum] && isWhite(lidMap[senderNum]));
+        const isWhiteSender = isWhite(senderNum) || isWhite(senderLid) || (lidMap[senderLid] && isWhite(lidMap[senderLid]));
         const isBlackSender = isBlack(senderNum) || isBlack(senderLid);
         const lower = text.toLowerCase().trim().replace(/_/g,' ');
         const isForward = (m.message.extendedTextMessage && m.message.extendedTextMessage.contextInfo && m.message.extendedTextMessage.contextInfo.isForwarded) || (m.message.imageMessage && m.message.imageMessage.contextInfo && m.message.imageMessage.contextInfo.isForwarded) || (m.message.videoMessage && m.message.videoMessage.contextInfo && m.message.videoMessage.contextInfo.isForwarded);
@@ -230,7 +235,6 @@ async function startBot() {
         const ctx = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
         const quotedParticipant = ctx ? (ctx.participantPn || ctx.participant) : null;
         const quotedKey = (ctx && ctx.stanzaId) ? { remoteJid: from, id: ctx.stanzaId, participant: quotedParticipant, fromMe: false } : null;
-        // --- جديد: لو المرسل مشرف، ما يتعاقبش تلقائيا ---
         let isAdminSender = false;
         if (isGroup && !isOwnerSender) {
           try {
@@ -266,7 +270,7 @@ async function startBot() {
             menu += '│ 👻 الوضع: يخدم في كل القروبات\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
-            menu += '• .ايدي\n• .تشخيص\n• حظر جماعي: الصق أرقام + كلمة الأمر في الأخير\n• ابيض جماعي: الصق أرقام + كلمة الأمر في الأخير\n• فك حظر جماعي: الصق أرقام + كلمة الأمر في الأخير\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .طرد - رد على رسالة\n• .معلومات\n• .ping';
+            menu += '• .ايدي\n• .تشخيص\n• رد على رسالة + .ابيض / .حظر / .طرد / .فك حظر\n• تاق @ + .ابيض / .حظر\n• ارقام + .ابيض / .حظر\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .ping';
             await reply(from, menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
@@ -293,62 +297,57 @@ async function startBot() {
           if (lower === '.حذف بلاك') { blackList = []; saveLists(); await reply(from, '✅ مسحت البلاك كله'); continue; }
           if (lower.indexOf('.طرد') === 0) {
             if (!isGroup) { await reply(from, '⚠️ الطرد يخدم في القروب بس'); continue; }
-            let target = null;
-            if (quotedParticipant) target = quotedParticipant;
-            else { let nums = extractAllNumbers(text); if (nums.length) target = nums[0] + '@s.whatsapp.net'; }
-            if (target) {
-              if (isWhite(getNum(target))) { await reply(from, '🤍 هذا في البيضاء - ما نقدرش نطرده'); continue; }
-              await kickUser(from, target);
-              if (blackList.indexOf(getNum(target)) === -1) { blackList.push(getNum(target)); saveLists(); }
-              await notifyOwner('🚨 طردت ' + getNum(target) + ' من قروب ' + from);
-            } else { await reply(from, '⚠️ رد على رسالة الشخص'); }
-            continue;
-          }
-          if (lower.indexOf('.حظر') !== -1 || lower.indexOf('.اضف بلاك') !== -1) {
-            let nums = [];
-            if (quotedParticipant) nums = [getNum(quotedParticipant)];
-            else nums = extractAllNumbers(text);
-            let toBan = nums.filter((n) => !isWhite(n));
-            let blockedWhite = nums.filter((n) => isWhite(n));
-            if (blockedWhite.length && !toBan.length) { await reply(from, '🤍 هادم في البيضاء - ما نقدرش نحظرهم'); continue; }
-            if (toBan.length) {
-              for (let n of toBan) { if (blackList.indexOf(n) === -1) blackList.push(n); }
-              saveLists();
-              await reply(from, '🚫 حظرت ' + toBan.length + ' رقم' + (blockedWhite.length ? '\n🤍 تجاهلت ' + blockedWhite.length + ' لأنهم في البيضاء' : '') + '\nتوا بنطردهم من كل القروبات اللي انت مشرف فيها');
-              let k = await kickBlacklistedFromAllGroups();
-              if (k > 0) await reply(from, '✅ طردت ' + k + ' واحد منهم كان قاعد جوا القروبات');
-              else await reply(from, 'ℹ️ ما لقيت حد منهم قاعد جوا القروبات توا، بس لو خش أي قروب بينطرد بروحه');
-            } else { await reply(from, '⚠️ ابعت رقم ولا قائمة أرقام، وحط كلمة الأمر في الأخير'); }
+            let targets = getTargets(text, ctx, quotedParticipant);
+            if (targets.length) {
+              let target = targets[0];
+              if (isWhite(target)) { await reply(from, '🤍 تعذر، لأنه في القائمة البيضاء'); continue; }
+              await kickUser(from, target + '@s.whatsapp.net');
+              if (blackList.indexOf(target) === -1) { blackList.push(target); saveLists(); }
+              await notifyOwner('🚨 طردت ' + target + ' من قروب ' + from);
+            } else { await reply(from, '⚠️ رد على رسالة الشخص ولا تاقيه ولا ابعث رقمه'); }
             continue;
           }
           if (lower.indexOf('.فك حظر') !== -1 || lower.indexOf('.الغاء حظر') !== -1 || lower.indexOf('.الغاء بلاك') !== -1) {
-            let nums = [];
-            if (quotedParticipant) nums = [getNum(quotedParticipant)];
-            else nums = extractAllNumbers(text);
+            let nums = getTargets(text, ctx, quotedParticipant);
             if (nums.length) {
               for (let n of nums) blackList = blackList.filter((x) => x !== n);
               saveLists();
               await reply(from, '✅ فكيت الحظر على ' + nums.length + ' رقم');
-            } else { await reply(from, '⚠️ ابعت رقم مع أمر فك الحظر'); }
-            continue;
-          }
-          if (lower.indexOf('.ابيض') !== -1) {
-            let nums = extractAllNumbers(text);
-            if (nums.length) {
-              for (let n of nums) {
-                if (whiteList.indexOf(n) === -1) whiteList.push(n);
-                blackList = blackList.filter((x) => x !== n);
-              }
-              saveLists();
-              await reply(from, '✅ ضفت ' + nums.length + ' رقم للبيضاء');
-            }
+            } else { await reply(from, '⚠️ رد على رسالته ولا تاقيه ولا ابعث رقمه'); }
             continue;
           }
           if (lower.indexOf('.الغاء ابيض') !== -1) {
-            let nums = extractAllNumbers(text);
+            let nums = getTargets(text, ctx, quotedParticipant);
             for (let n of nums) whiteList = whiteList.filter((x) => x !== n);
             saveLists();
             await reply(from, '✅ نحيت ' + nums.length + ' رقم من البيضاء');
+            continue;
+          }
+          if (lower.indexOf('.حظر') !== -1 || lower.indexOf('.اضف بلاك') !== -1) {
+            let nums = getTargets(text, ctx, quotedParticipant);
+            let inWhite = nums.filter((n) => isWhite(n));
+            let toBan = nums.filter((n) => !isWhite(n));
+            if (inWhite.length) { await reply(from, '⛔ تعذر، لأنه في القائمة البيضاء:\n' + inWhite.join('\n') + '\nديرله .الغاء ابيض قبل بعدين حظره'); continue; }
+            if (toBan.length) {
+              for (let n of toBan) { if (blackList.indexOf(n) === -1) blackList.push(n); }
+              saveLists();
+              await reply(from, '🚫 حظرت ' + toBan.length + ' رقم\nتوا بنطردهم من كل القروبات اللي انت مشرف فيها');
+              let k = await kickBlacklistedFromAllGroups();
+              if (k > 0) await reply(from, '✅ طردت ' + k + ' واحد منهم كان قاعد جوا القروبات');
+              else await reply(from, 'ℹ️ ما لقيت حد منهم قاعد جوا القروبات توا، بس لو خش أي قروب بينطرد بروحه');
+            } else { await reply(from, '⚠️ رد على رسالته ولا تاقيه ولا ابعث رقمه + .حظر'); }
+            continue;
+          }
+          if (lower.indexOf('.ابيض') !== -1) {
+            let nums = getTargets(text, ctx, quotedParticipant);
+            if (nums.length) {
+              let inBlack = nums.filter((n) => isBlack(n));
+              let toAdd = nums.filter((n) => !isBlack(n));
+              if (inBlack.length) { await reply(from, '⛔ تعذر، لأنه في القائمة السوداء:\n' + inBlack.join('\n') + '\nديرله .فك حظر قبل بعدين ضيفه ابيض'); continue; }
+              for (let n of toAdd) { if (whiteList.indexOf(n) === -1) whiteList.push(n); }
+              saveLists();
+              await reply(from, '✅ ضفت ' + toAdd.length + ' رقم للبيضاء');
+            } else { await reply(from, '⚠️ رد على رسالته ولا تاقيه ولا ابعث رقمه + .ابيض'); }
             continue;
           }
           continue;
