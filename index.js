@@ -74,7 +74,7 @@ async function kickUser(jid, user) {
 async function deleteMsg(jid, key) {
   try { await sock.sendMessage(jid, { delete: key }); } catch(e) {}
 }
-// --- مصلحة نهائيا: نقص :15 قبل norm ---
+// --- مصلحة نهائيا: نجيب الأدمن بـ groupMetadata مش من الكاش ---
 async function kickBlacklistedFromAllGroups() {
   if (!sock) return 0;
   let kicked = 0;
@@ -84,7 +84,7 @@ async function kickBlacklistedFromAllGroups() {
     for (let jid in groups) {
       if (jid === CONTROL_GROUP) continue;
       try {
-        const meta = groups[jid];
+        const meta = await sock.groupMetadata(jid);
         let me = null;
         for (let p of meta.participants) { if (norm(p.id.split(':')[0].split('@')[0]) === myNum) me = p; }
         if (!me || !me.admin) continue;
@@ -182,14 +182,16 @@ async function startBot() {
               let adminList = [];
               let notAdminList = [];
               for (let jid in groups) {
-                const meta = groups[jid];
-                let me2 = null;
-                for (let p of meta.participants) { if (norm(p.id.split(':')[0].split('@')[0]) === myNum2) me2 = p; }
-                let name = await getGroupName(jid);
-                if (me2 && me2.admin) adminList.push(name);
-                else notAdminList.push(name);
+                try {
+                  const meta = await sock.groupMetadata(jid);
+                  let me2 = null;
+                  for (let p of meta.participants) { if (norm(p.id.split(':')[0].split('@')[0]) === myNum2) me2 = p; }
+                  let name = meta.subject || jid;
+                  if (me2 && me2.admin) adminList.push(name);
+                  else notAdminList.push(name);
+                } catch(e) { notAdminList.push(jid); }
               }
-              let msg = '🔍 تشخيص:\nرقمي: ' + myNum2 + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\n' + (adminList.length ? adminList.join('\n') : 'ولا قروب') + '\nمش أدمن في: ' + notAdminList.length + '\n' + (notAdminList.length ? notAdminList.join('\n') : 'مافيش') + '\nبلاك: ' + blackList.length;
+              let msg = '🔍 تشخيص:\nرقمي: ' + myNum2 + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\n' + (adminList.length ? adminList.join('\n') : 'ولا قروب') + '\nمش أدمن في: ' + notAdminList.length + '\nبلاك: ' + blackList.length;
               await reply(from, msg);
             } catch(e) { await reply(from, 'خطأ تشخيص: ' + e.message); }
             continue;
