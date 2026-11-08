@@ -36,7 +36,6 @@ const extractAllNumbers = (text) => {
 const isOwner = (n) => norm(n) === OWNER_NUMBER;
 const isWhite = (n) => whiteList.indexOf(norm(n)) !== -1;
 const isBlack = (n) => blackList.indexOf(norm(n)) !== -1;
-// --- جديد: نجيب رقمك + LID متعك ---
 function getMyIds() {
   if (!sock || !sock.user) return [OWNER_NUMBER];
   let ids = [];
@@ -53,9 +52,20 @@ function isMe(p) {
   return myIds.indexOf(pid) !== -1 || (pPhone && myIds.indexOf(pPhone) !== -1) || (pLid && myIds.indexOf(pLid) !== -1) || p.id === sock.user.id || p.id === sock.user.lid;
 }
 function getParticipantNum(p) {
-  // في القروبات الجديدة، الرقم الحقيقي يكون في phoneNumber، والـ id يكون LID
   if (p.phoneNumber) return getNum(p.phoneNumber);
   return getNum(p.id);
+}
+function isWhiteParticipant(p) {
+  if (!p) return false;
+  let nums = [];
+  if (typeof p === 'string') nums.push(getNum(p));
+  else {
+    if (p.id) nums.push(getNum(p.id));
+    if (p.phoneNumber) nums.push(getNum(p.phoneNumber));
+    if (p.lid) nums.push(getNum(p.lid));
+  }
+  for (let n of nums) if (isWhite(n)) return true;
+  return false;
 }
 let linkCount = {};
 let stickerCount = {};
@@ -96,7 +106,6 @@ async function kickUser(jid, user) {
 async function deleteMsg(jid, key) {
   try { await sock.sendMessage(jid, { delete: key }); } catch(e) {}
 }
-// --- خفيف: يستعمل الكاش بس، من غير groupMetadata لكل قروب ---
 async function kickBlacklistedFromAllGroups() {
   if (!sock) return 0;
   let kicked = 0;
@@ -111,6 +120,7 @@ async function kickBlacklistedFromAllGroups() {
         if (!me || !me.admin) continue;
         for (let p of meta.participants) {
           let n = getParticipantNum(p);
+          if (isWhiteParticipant(p)) continue;
           if (isBlack(n) && !isOwner(n)) {
             await kickUser(jid, p.id);
             kicked++;
@@ -125,7 +135,7 @@ async function kickBlacklistedFromAllGroups() {
 const hasLink = (t) => {
   if (!t) return false;
   let clean = t.toLowerCase().replace(/\s+/g,'').replace(/[:;]/g,':');
-  return /(https?:\/\/|www\.|t\.me\/|telegram\.me\/|wa\.me\/|whatsapp\.com\/|discord\.gg\/|instagram\.com\/|facebook\.com\/|youtube\.com\/|tiktok\.com\/|\.com|\.net|\.org|\.ly|\.io)/.test(clean);
+  return /(https?:\/\/|www\.|t\.me\/|telegram\.me\/|wa\.me\/|whatsapp\.com\/|chat\.whatsapp\.com|discord\.gg\/|instagram\.com\/|facebook\.com\/|youtube\.com\/|tiktok\.com\/|vt\.tiktok\.com|finder\.me|\.com|\.net|\.org|\.ly|\.io)/.test(clean);
 };
 const BAN_WORDS = ['.ban', 'تبنيد', 'تخريب', 'هكر'];
 async function startBot() {
@@ -158,6 +168,7 @@ async function startBot() {
       if (joinTimes[jid].length >= 3) {
         await lockGroup(jid);
         for (const p of u.participants) {
+          if (isWhiteParticipant(p)) continue;
           if (!isOwner(getNum(p)) && !isWhite(getNum(p))) {
             await kickUser(jid, p);
             if (blackList.indexOf(getNum(p)) === -1) blackList.push(getNum(p));
@@ -177,20 +188,23 @@ async function startBot() {
         const from = m.key.remoteJid;
         const isGroup = from && from.endsWith('@g.us');
         const sender = m.key.participant || m.key.remoteJid;
-        const senderNum = getNum(sender);
+        const senderPn = m.key.participantPn || sender;
+        const senderNum = getNum(senderPn);
+        const senderLid = getNum(sender);
         const text = m.message.conversation || (m.message.extendedTextMessage && m.message.extendedTextMessage.text) || (m.message.imageMessage && m.message.imageMessage.caption) || (m.message.videoMessage && m.message.videoMessage.caption) || '';
+        const isContact = !!m.message.contactMessage || !!m.message.contactsArrayMessage || !!m.message.contactMessageV2;
         if (m.key.fromMe) {
           let t = text.trim();
           if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0) continue;
         }
-        const isOwnerSender = isOwner(senderNum) || m.key.fromMe || sender === OWNER_NUMBER + '@s.whatsapp.net';
-        const isWhiteSender = isWhite(senderNum);
-        const isBlackSender = isBlack(senderNum);
+        const isOwnerSender = isOwner(senderNum) || isOwner(senderLid) || m.key.fromMe || sender === OWNER_NUMBER + '@s.whatsapp.net';
+        const isWhiteSender = isWhite(senderNum) || isWhite(senderLid);
+        const isBlackSender = isBlack(senderNum) || isBlack(senderLid);
         const lower = text.toLowerCase().trim().replace(/_/g,' ');
         const isForward = (m.message.extendedTextMessage && m.message.extendedTextMessage.contextInfo && m.message.extendedTextMessage.contextInfo.isForwarded) || (m.message.imageMessage && m.message.imageMessage.contextInfo && m.message.imageMessage.contextInfo.isForwarded) || (m.message.videoMessage && m.message.videoMessage.contextInfo && m.message.videoMessage.contextInfo.isForwarded);
         const isSticker = !!m.message.stickerMessage;
         const ctx = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
-        const quotedParticipant = ctx ? ctx.participant : null;
+        const quotedParticipant = ctx ? (ctx.participantPn || ctx.participant) : null;
         const quotedKey = (ctx && ctx.stanzaId) ? { remoteJid: from, id: ctx.stanzaId, participant: quotedParticipant, fromMe: false } : null;
         if (isOwnerSender) {
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
@@ -206,7 +220,7 @@ async function startBot() {
                 for (let p of meta.participants) { if (isMe(p)) me2 = p; }
                 if (me2 && me2.admin) adminList.push(meta.subject || jid);
               }
-              let msg = '🔍 تشخيص:\nرقمي: ' + OWNER_NUMBER + '\nLID: ' + (sock.user.lid ? getNum(sock.user.lid) : 'مافيش') + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\n' + (adminList.length ? adminList.join('\n') : 'ولا قروب') + '\nبلاك: ' + blackList.length;
+              let msg = '🔍 تشخيص:\nرقمي: ' + OWNER_NUMBER + '\nLID: ' + (sock.user.lid ? getNum(sock.user.lid) : 'مافيش') + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\n' + (adminList.length ? adminList.join('\n') : 'ولا قروب') + '\nبيضاء: ' + whiteList.length + '\nبلاك: ' + blackList.length;
               await reply(from, msg);
             } catch(e) { await reply(from, 'خطأ تشخيص: ' + e.message); }
             continue;
@@ -235,7 +249,9 @@ async function startBot() {
           if ((lower === '.سكر' || lower === '.قفل') && isGroup) { try { await sock.groupSettingUpdate(from, 'announcement'); await reply(from, '🔒 سكرت القروب'); } catch(e) {} continue; }
           if (lower === '.قفل الروابط') { lockLinks = true; saveLists(); await reply(from, '🔗 قفلت الروابط'); continue; }
           if (lower === '.فتح الروابط') { lockLinks = false; saveLists(); await reply(from, '🔗 فتحت الروابط'); continue; }
+          // --- جديد: .حذف ما يمسش البيضاء ---
           if (lower === '.حذف' && isGroup) {
+            if (quotedParticipant && isWhite(getNum(quotedParticipant))) { await reply(from, '🤍 هذا في البيضاء - ما نقدرش نحذف رسايله'); continue; }
             if (quotedKey) { await deleteMsg(from, quotedKey); await notifyOwner('✅ تم الحذف في قروب ' + from); }
             else { await reply(from, '⚠️ رد على الرسالة اللي تبي تحذفها'); }
             continue;
@@ -243,12 +259,14 @@ async function startBot() {
           if (lower === '.حذف القوائم' || lower === '.حذف الكل') { whiteList = []; blackList = []; saveLists(); await reply(from, '✅ مسحت البيضاء والبلاك كلهم'); continue; }
           if (lower === '.حذف ابيض') { whiteList = []; saveLists(); await reply(from, '✅ مسحت البيضاء كلها'); continue; }
           if (lower === '.حذف بلاك') { blackList = []; saveLists(); await reply(from, '✅ مسحت البلاك كله'); continue; }
+          // --- جديد: .طرد ما يطردش البيضاء ---
           if (lower.indexOf('.طرد') === 0) {
             if (!isGroup) { await reply(from, '⚠️ الطرد يخدم في القروب بس'); continue; }
             let target = null;
             if (quotedParticipant) target = quotedParticipant;
             else { let nums = extractAllNumbers(text); if (nums.length) target = nums[0] + '@s.whatsapp.net'; }
             if (target) {
+              if (isWhite(getNum(target))) { await reply(from, '🤍 هذا في البيضاء - ما نقدرش نطرده'); continue; }
               await kickUser(from, target);
               if (blackList.indexOf(getNum(target)) === -1) { blackList.push(getNum(target)); saveLists(); }
               await notifyOwner('🚨 طردت ' + getNum(target) + ' من قروب ' + from);
@@ -259,10 +277,14 @@ async function startBot() {
             let nums = [];
             if (quotedParticipant) nums = [getNum(quotedParticipant)];
             else nums = extractAllNumbers(text);
-            if (nums.length) {
-              for (let n of nums) { if (blackList.indexOf(n) === -1) blackList.push(n); }
+            // --- جديد: نحي البيضاء من الحظر ---
+            let toBan = nums.filter((n) => !isWhite(n));
+            let blockedWhite = nums.filter((n) => isWhite(n));
+            if (blockedWhite.length && !toBan.length) { await reply(from, '🤍 هادم في البيضاء - ما نقدرش نحظرهم'); continue; }
+            if (toBan.length) {
+              for (let n of toBan) { if (blackList.indexOf(n) === -1) blackList.push(n); }
               saveLists();
-              await reply(from, '🚫 حظرت ' + nums.length + ' رقم\nتوا بنطردهم من كل القروبات اللي انت مشرف فيها');
+              await reply(from, '🚫 حظرت ' + toBan.length + ' رقم' + (blockedWhite.length ? '\n🤍 تجاهلت ' + blockedWhite.length + ' لأنهم في البيضاء' : '') + '\nتوا بنطردهم من كل القروبات اللي انت مشرف فيها');
               let k = await kickBlacklistedFromAllGroups();
               if (k > 0) await reply(from, '✅ طردت ' + k + ' واحد منهم كان قاعد جوا القروبات');
               else await reply(from, 'ℹ️ ما لقيت حد منهم قاعد جوا القروبات توا، بس لو خش أي قروب بينطرد بروحه');
@@ -283,7 +305,10 @@ async function startBot() {
           if (lower.indexOf('.ابيض') !== -1) {
             let nums = extractAllNumbers(text);
             if (nums.length) {
-              for (let n of nums) { if (whiteList.indexOf(n) === -1) whiteList.push(n); }
+              for (let n of nums) {
+                if (whiteList.indexOf(n) === -1) whiteList.push(n);
+                blackList = blackList.filter((x) => x !== n);
+              }
               saveLists();
               await reply(from, '✅ ضفت ' + nums.length + ' رقم للبيضاء');
             }
@@ -300,8 +325,14 @@ async function startBot() {
         }
         if (!isGroup) continue;
         if (from === CONTROL_GROUP) continue;
+        // --- البيضاء: لا حذف ولا طرد ولا أي عقوبة ---
         if (isWhiteSender) continue;
         if (isBlackSender) { await deleteMsg(from, m.key); await kickUser(from, sender); await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: في البلاك'); continue; }
+        if (isContact) {
+          await deleteMsg(from, m.key);
+          await notifyOwner('🧹 حذفت جهة اتصال من ' + senderNum + ' في قروب ' + from);
+          continue;
+        }
         if (BAN_WORDS.some((w) => lower.indexOf(w) !== -1)) {
           await deleteMsg(from, m.key);
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
@@ -339,7 +370,7 @@ async function startBot() {
           if (!stickerCount[senderNum]) stickerCount[senderNum] = [];
           stickerCount[senderNum] = stickerCount[senderNum].filter((t) => now - t < 10000);
           stickerCount[senderNum].push(now);
-          if (stickerCount[senderNum].length > 2) {
+          if (stickerCount[senderNum].length > 1) {
             await deleteMsg(from, m.key);
             await notifyOwner('🧹 حذفت ملصق سبام من ' + senderNum + ' في قروب ' + from);
             continue;
