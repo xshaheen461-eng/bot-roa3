@@ -77,7 +77,6 @@ function linkLidToPhone(lid, phone) {
   if (lid === phone) return;
   lidMap[lid] = phone;
 }
-// يجيب الرقم من الرد + التاق + النص
 function getTargets(text, ctx, quotedParticipant) {
   let nums = [];
   let add = (n) => { n = getNum(n); if (n && nums.indexOf(n) === -1) nums.push(n); };
@@ -92,6 +91,7 @@ let floodCount = {};
 let joinTimes = {};
 let groupNameCache = {};
 let lastKickNotify = {};
+let groupBaseName = {};
 async function getGroupName(jid) {
   if (!jid) return jid;
   if (groupNameCache[jid]) return groupNameCache[jid];
@@ -100,6 +100,23 @@ async function getGroupName(jid) {
     groupNameCache[jid] = meta.subject || jid;
     return groupNameCache[jid];
   } catch(e) { return jid; }
+}
+async function rotateGroupNameOnKick(jid) {
+  try {
+    if (!jid || jid === CONTROL_GROUP) return;
+    const meta = await sock.groupMetadata(jid);
+    let current = meta.subject || '';
+    if (!groupBaseName[jid]) {
+      groupBaseName[jid] = current.split(' | ')[0].replace(/🛡️/g,'').replace(/🔒/g,'').trim();
+    }
+    let base = groupBaseName[jid];
+    let now = new Date();
+    let suffix = now.getHours() + ':' + now.getMinutes() + ':' + now.getSeconds();
+    let newName = base + ' | 🛡️ ' + suffix;
+    await sock.groupUpdateSubject(jid, newName);
+    groupNameCache[jid] = newName;
+    console.log('تم تغيير اسم القروب بعد طرد مبند: ' + newName);
+  } catch(e) { console.log('فشل تغيير الاسم:', e.message); }
 }
 async function notifyOwner(text) {
   if (!sock) return;
@@ -127,6 +144,11 @@ async function lockGroup(jid) {
 async function kickUser(jid, user) {
   try { await sock.groupParticipantsUpdate(jid, [user], 'remove'); return true; } catch(e) { return false; }
 }
+async function kickAndRename(jid, user, reason) {
+  let ok = await kickUser(jid, user);
+  if (ok) { await rotateGroupNameOnKick(jid); }
+  return ok;
+}
 async function deleteMsg(jid, key) {
   try { await sock.sendMessage(jid, { delete: key }); } catch(e) {}
 }
@@ -148,10 +170,10 @@ async function kickBlacklistedFromAllGroups() {
           if (p.admin) continue;
           if (isWhiteParticipant(p)) continue;
           if (isBlack(n) && !isOwner(n)) {
-            let ok = await kickUser(jid, p.id);
+            let ok = await kickAndRename(jid, p.id, 'بلاك');
             if (ok) {
               kicked++;
-              await notifyOwner('🚨 طردت ' + n + ' من قروب ' + jid + '\nالسبب: في البلاك - طرد تلقائي');
+              await notifyOwner('🚨 طردت ' + n + ' من قروب ' + jid + '\nالسبب: في البلاك - طرد تلقائي\n🔄 تم تغيير اسم القروب');
             }
           }
         }
@@ -166,6 +188,8 @@ const hasLink = (t) => {
   return /(https?:\/\/|www\.|t\.me\/|telegram\.me\/|wa\.me\/|whatsapp\.com\/|chat\.whatsapp\.com|discord\.gg\/|instagram\.com\/|facebook\.com\/|youtube\.com\/|tiktok\.com\/|vt\.tiktok\.com|finder\.me|\.com|\.net|\.org|\.ly|\.io)/.test(clean);
 };
 const BAN_WORDS = ['.ban', 'تبنيد', 'تخريب', 'هكر'];
+// ===== تسكير الثغرة: اي امر خطير من غير المالك = حظر فوري =====
+const DANGEROUS_COMMANDS = ['.ban', 'ban(', 'add3', '.add3', '.تشخيص', '.ادوات', '.ايدي', '.قائمة', '.بيضاء', '.بلاك'];
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
   const { version } = await fetchLatestBaileysVersion();
@@ -175,7 +199,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - يخدم في كل القروبات');
+      notifyOwner('✅ البوت متصل - الثغرة مسكرة - يخدم في كل القروبات');
       setTimeout(() => { kickBlacklistedFromAllGroups(); }, 8000);
       setInterval(() => { kickBlacklistedFromAllGroups(); }, 5*60*1000);
     }
@@ -189,6 +213,14 @@ async function startBot() {
       if (u.action !== 'add') return;
       const jid = u.id;
       if (jid === CONTROL_GROUP) return;
+      for (let p of u.participants) {
+        let n = getNum(p);
+        if (isBlack(n) && !isOwner(n) && !isWhite(n)) {
+          await kickAndRename(jid, p, 'بلاك دخل');
+          await notifyOwner('🚫 طردت بوت / مبند ' + n + ' اول ما خش لقروب ' + jid + '\n🔄 تم تغيير اسم القروب');
+          continue;
+        }
+      }
       if (!joinTimes[jid]) joinTimes[jid] = [];
       let now = Date.now();
       joinTimes[jid] = joinTimes[jid].filter((t) => now - t < 30000);
@@ -198,12 +230,12 @@ async function startBot() {
         for (const p of u.participants) {
           if (isWhiteParticipant(p)) continue;
           if (!isOwner(getNum(p)) && !isWhite(getNum(p))) {
-            await kickUser(jid, p);
+            await kickAndRename(jid, p, 'هجوم');
             if (blackList.indexOf(getNum(p)) === -1) blackList.push(getNum(p));
           }
         }
         saveLists();
-        await notifyOwner('🚨 هجوم بوتات في قروب ' + jid + '! سكرت القروب وطردتهم بصمت');
+        await notifyOwner('🚨 هجوم بوتات في قروب ' + jid + '! سكرت القروب وطردتهم بصمت + غيرت الاسم');
         joinTimes[jid] = [];
       }
     } catch(e) { console.log('Raid Error:', e.message); }
@@ -226,10 +258,28 @@ async function startBot() {
           let t = text.trim();
           if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0) continue;
         }
-        const isOwnerSender = isOwner(senderNum) || isOwner(senderLid) || m.key.fromMe || sender === OWNER_NUMBER + '@s.whatsapp.net';
+        // ===== تحقق صارم من المالك - تسكير الثغرة =====
+        // المالك هو رقمك بس، لا LID ولا غيره
+        const isOwnerSender = isOwner(senderNum) || m.key.fromMe;
         const isWhiteSender = isWhite(senderNum) || isWhite(senderLid) || (lidMap[senderLid] && isWhite(lidMap[senderLid]));
         const isBlackSender = isBlack(senderNum) || isBlack(senderLid);
         const lower = text.toLowerCase().trim().replace(/_/g,' ');
+
+        // ===== الثغرة مسكرة هنا =====
+        // لو اي واحد مش المالك كتب .ban ولا add3 ولا .تشخيص في الخاص ولا في القروب
+        // البوت معاش يعطيه قائمة القروبات، يحظره ويسكت
+        const isDangerous = DANGEROUS_COMMANDS.some(cmd => lower.includes(cmd));
+        if (isDangerous && !isOwnerSender) {
+          if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
+          await notifyOwner('🛡️ محاولة استغلال ثغرة .ban من ' + senderNum + ' في ' + (isGroup ? 'قروب ' + from : 'الخاص') + '\nتم حظره تلقائيا ولم يتم ارسال قائمة القروبات');
+          // لو كان في قروب، نطرده ونغير الاسم
+          if (isGroup) {
+            try { await deleteMsg(from, m.key); } catch(e) {}
+            await kickAndRename(from, sender, 'محاولة ثغرة ban');
+          }
+          continue; // ما نكملش، وما نبعثش اي قائمة
+        }
+
         const isForward = (m.message.extendedTextMessage && m.message.extendedTextMessage.contextInfo && m.message.extendedTextMessage.contextInfo.isForwarded) || (m.message.imageMessage && m.message.imageMessage.contextInfo && m.message.imageMessage.contextInfo.isForwarded) || (m.message.videoMessage && m.message.videoMessage.contextInfo && m.message.videoMessage.contextInfo.isForwarded);
         const isSticker = !!m.message.stickerMessage;
         const ctx = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
@@ -244,9 +294,12 @@ async function startBot() {
           } catch(e) {}
         }
         if (isOwnerSender) {
+          // اوامر المالك تخدم في قروب التحكم او في القروبات اللي انت فيها فقط، مش لاي حد
+          // واوامر القوائم تخدم في قروب التحكم بس
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
-          if (lower === '.ping') { await reply(from, '✅ Bot online - يخدم في كل القروبات'); continue; }
+          if (lower === '.ping') { await reply(from, '✅ Bot online - الثغرة مسكرة'); continue; }
           if (lower === '.تشخيص') {
+            if (from !== CONTROL_GROUP && isGroup) { await reply(from, '⚠️ التشخيص في قروب التحكم بس'); continue; }
             try {
               const groups = await sock.groupFetchAllParticipating();
               let total = Object.keys(groups).length;
@@ -257,7 +310,7 @@ async function startBot() {
                 for (let p of meta.participants) { if (isMe(p)) me2 = p; }
                 if (me2 && me2.admin) adminList.push(meta.subject || jid);
               }
-              let msg = '🔍 تشخيص:\nرقمي: ' + OWNER_NUMBER + '\nLID: ' + (sock.user.lid ? getNum(sock.user.lid) : 'مافيش') + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\n' + (adminList.length ? adminList.join('\n') : 'ولا قروب') + '\nبيضاء: ' + whiteList.length + '\nبلاك: ' + blackList.length;
+              let msg = '🔍 تشخيص:\nرقمي: ' + OWNER_NUMBER + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\nبيضاء: ' + whiteList.length + '\nبلاك: ' + blackList.length;
               await reply(from, msg);
             } catch(e) { await reply(from, 'خطأ تشخيص: ' + e.message); }
             continue;
@@ -267,7 +320,7 @@ async function startBot() {
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ 👻 الوضع: يخدم في كل القروبات\n';
+            menu += '│ 👻 الوضع: الثغرة مسكرة\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
             menu += '• .ايدي\n• .تشخيص\n• رد على رسالة + .ابيض / .حظر / .طرد / .فك حظر\n• تاق @ + .ابيض / .حظر\n• ارقام + .ابيض / .حظر\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .ping';
@@ -301,9 +354,9 @@ async function startBot() {
             if (targets.length) {
               let target = targets[0];
               if (isWhite(target)) { await reply(from, '🤍 تعذر، لأنه في القائمة البيضاء'); continue; }
-              await kickUser(from, target + '@s.whatsapp.net');
+              await kickAndRename(from, target + '@s.whatsapp.net', 'طرد يدوي');
               if (blackList.indexOf(target) === -1) { blackList.push(target); saveLists(); }
-              await notifyOwner('🚨 طردت ' + target + ' من قروب ' + from);
+              await notifyOwner('🚨 طردت ' + target + ' من قروب ' + from + '\n🔄 تم تغيير اسم القروب');
             } else { await reply(from, '⚠️ رد على رسالة الشخص ولا تاقيه ولا ابعث رقمه'); }
             continue;
           }
@@ -333,8 +386,8 @@ async function startBot() {
               saveLists();
               await reply(from, '🚫 حظرت ' + toBan.length + ' رقم\nتوا بنطردهم من كل القروبات اللي انت مشرف فيها');
               let k = await kickBlacklistedFromAllGroups();
-              if (k > 0) await reply(from, '✅ طردت ' + k + ' واحد منهم كان قاعد جوا القروبات');
-              else await reply(from, 'ℹ️ ما لقيت حد منهم قاعد جوا القروبات توا، بس لو خش أي قروب بينطرد بروحه');
+              if (k > 0) await reply(from, '✅ طردت ' + k + ' واحد منهم كان قاعد جوا القروبات + غيرت اسماء القروبات');
+              else await reply(from, 'ℹ️ ما لقيت حد منهم قاعد جوا القروبات توا، بس لو خش أي قروب بينطرد بروحه + بيتغير الاسم');
             } else { await reply(from, '⚠️ رد على رسالته ولا تاقيه ولا ابعث رقمه + .حظر'); }
             continue;
           }
@@ -356,7 +409,7 @@ async function startBot() {
         if (from === CONTROL_GROUP) continue;
         if (isWhiteSender) continue;
         if (isAdminSender) continue;
-        if (isBlackSender) { await deleteMsg(from, m.key); await kickUser(from, sender); await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: في البلاك'); continue; }
+        if (isBlackSender) { await deleteMsg(from, m.key); await kickAndRename(from, sender, 'بلاك'); await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: في البلاك\n🔄 تم تغيير اسم القروب'); continue; }
         if (isContact) {
           await deleteMsg(from, m.key);
           await notifyOwner('🧹 حذفت جهة اتصال من ' + senderNum + ' في قروب ' + from);
@@ -365,28 +418,28 @@ async function startBot() {
         if (BAN_WORDS.some((w) => lower.indexOf(w) !== -1)) {
           await deleteMsg(from, m.key);
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-          await kickUser(from, sender);
-          await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: كلمة تبنيد / تخريب / هكر');
+          await kickAndRename(from, sender, 'كلمة تبنيد');
+          await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: كلمة تبنيد / تخريب / هكر\n🔄 تم تغيير اسم القروب');
           continue;
         }
         if (isForward) {
           await deleteMsg(from, m.key);
-          await kickUser(from, sender);
-          await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: إعادة توجيه');
+          await kickAndRename(from, sender, 'فوروارد');
+          await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: إعادة توجيه\n🔄 تم تغيير اسم القروب');
           continue;
         }
         if (hasLink(text)) {
           if (lockLinks) {
             await deleteMsg(from, m.key);
-            await kickUser(from, sender);
-            await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: الروابط مقفولة');
+            await kickAndRename(from, sender, 'رابط');
+            await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: الروابط مقفولة\n🔄 تم تغيير اسم القروب');
             continue;
           }
           await deleteMsg(from, m.key);
           linkCount[senderNum] = (linkCount[senderNum] || 0) + 1;
           if (linkCount[senderNum] >= 2) {
-            await kickUser(from, sender);
-            await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: رابط مكرر');
+            await kickAndRename(from, sender, 'رابط مكرر');
+            await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: رابط مكرر\n🔄 تم تغيير اسم القروب');
             linkCount[senderNum] = 0;
           } else {
             await lockGroup(from);
