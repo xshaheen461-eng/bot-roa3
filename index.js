@@ -5,6 +5,7 @@ const fs = require('fs');
 const pino = require('pino');
 const OWNER_NUMBER = (process.env.OWNER_NUMBER || '218920972444').replace(/[^0-9]/g,'');
 const CONTROL_GROUP = '120363430679974162@g.us';
+const QR_SECRET = process.env.QR_SECRET || 'فتاك1234';
 const app = express();
 let qrCode = '';
 let sock = null;
@@ -92,6 +93,8 @@ let joinTimes = {};
 let groupNameCache = {};
 let lastKickNotify = {};
 let groupBaseName = {};
+let lastRename = {};
+let forwardedLocked = {};
 async function getGroupName(jid) {
   if (!jid) return jid;
   if (groupNameCache[jid]) return groupNameCache[jid];
@@ -104,14 +107,17 @@ async function getGroupName(jid) {
 async function rotateGroupNameOnKick(jid) {
   try {
     if (!jid || jid === CONTROL_GROUP) return;
+    let now = Date.now();
+    if (lastRename[jid] && now - lastRename[jid] < 5*60*1000) return;
+    lastRename[jid] = now;
     const meta = await sock.groupMetadata(jid);
     let current = meta.subject || '';
     if (!groupBaseName[jid]) {
       groupBaseName[jid] = current.split(' | ')[0].replace(/🛡️/g,'').replace(/🔒/g,'').trim();
     }
     let base = groupBaseName[jid];
-    let now = new Date();
-    let suffix = now.getHours() + ':' + now.getMinutes() + ':' + now.getSeconds();
+    let nowD = new Date();
+    let suffix = nowD.getHours() + ':' + nowD.getMinutes() + ':' + nowD.getSeconds();
     let newName = base + ' | 🛡️ ' + suffix;
     await sock.groupUpdateSubject(jid, newName);
     groupNameCache[jid] = newName;
@@ -188,7 +194,6 @@ const hasLink = (t) => {
   return /(https?:\/\/|www\.|t\.me\/|telegram\.me\/|wa\.me\/|whatsapp\.com\/|chat\.whatsapp\.com|discord\.gg\/|instagram\.com\/|facebook\.com\/|youtube\.com\/|tiktok\.com\/|vt\.tiktok\.com|finder\.me|\.com|\.net|\.org|\.ly|\.io)/.test(clean);
 };
 const BAN_WORDS = ['.ban', 'تبنيد', 'تخريب', 'هكر'];
-// ===== تسكير الثغرة: اي امر خطير من غير المالك = حظر فوري =====
 const DANGEROUS_COMMANDS = ['.ban', 'ban(', 'add3', '.add3', '.تشخيص', '.ادوات', '.ايدي', '.قائمة', '.بيضاء', '.بلاك'];
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
@@ -258,29 +263,24 @@ async function startBot() {
           let t = text.trim();
           if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0) continue;
         }
-        // ===== تحقق صارم من المالك - تسكير الثغرة =====
-        // المالك هو رقمك بس، لا LID ولا غيره
         const isOwnerSender = isOwner(senderNum) || m.key.fromMe;
         const isWhiteSender = isWhite(senderNum) || isWhite(senderLid) || (lidMap[senderLid] && isWhite(lidMap[senderLid]));
         const isBlackSender = isBlack(senderNum) || isBlack(senderLid);
         const lower = text.toLowerCase().trim().replace(/_/g,' ');
 
-        // ===== الثغرة مسكرة هنا =====
-        // لو اي واحد مش المالك كتب .ban ولا add3 ولا .تشخيص في الخاص ولا في القروب
-        // البوت معاش يعطيه قائمة القروبات، يحظره ويسكت
         const isDangerous = DANGEROUS_COMMANDS.some(cmd => lower.includes(cmd));
         if (isDangerous && !isOwnerSender) {
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
           await notifyOwner('🛡️ محاولة استغلال ثغرة .ban من ' + senderNum + ' في ' + (isGroup ? 'قروب ' + from : 'الخاص') + '\nتم حظره تلقائيا ولم يتم ارسال قائمة القروبات');
-          // لو كان في قروب، نطرده ونغير الاسم
           if (isGroup) {
             try { await deleteMsg(from, m.key); } catch(e) {}
             await kickAndRename(from, sender, 'محاولة ثغرة ban');
           }
-          continue; // ما نكملش، وما نبعثش اي قائمة
+          continue;
         }
 
-        const isForward = (m.message.extendedTextMessage && m.message.extendedTextMessage.contextInfo && m.message.extendedTextMessage.contextInfo.isForwarded) || (m.message.imageMessage && m.message.imageMessage.contextInfo && m.message.imageMessage.contextInfo.isForwarded) || (m.message.videoMessage && m.message.videoMessage.contextInfo && m.message.videoMessage.contextInfo.isForwarded);
+        // ===== مضاد اعادة التوجيه الجديد - يطرد الكل الا البيضاء + يقفل القروب من اول مرة =====
+        const isForward = (m.message.extendedTextMessage && m.message.extendedTextMessage.contextInfo && m.message.extendedTextMessage.contextInfo.isForwarded) || (m.message.imageMessage && m.message.imageMessage.contextInfo && m.message.imageMessage.contextInfo.isForwarded) || (m.message.videoMessage && m.message.videoMessage.contextInfo && m.message.videoMessage.contextInfo.isForwarded) || (m.message.stickerMessage && m.message.stickerMessage.contextInfo && m.message.stickerMessage.contextInfo.isForwarded) || (m.message.documentMessage && m.message.documentMessage.contextInfo && m.message.documentMessage.contextInfo.isForwarded);
         const isSticker = !!m.message.stickerMessage;
         const ctx = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
         const quotedParticipant = ctx ? (ctx.participantPn || ctx.participant) : null;
@@ -294,8 +294,6 @@ async function startBot() {
           } catch(e) {}
         }
         if (isOwnerSender) {
-          // اوامر المالك تخدم في قروب التحكم او في القروبات اللي انت فيها فقط، مش لاي حد
-          // واوامر القوائم تخدم في قروب التحكم بس
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
           if (lower === '.ping') { await reply(from, '✅ Bot online - الثغرة مسكرة'); continue; }
           if (lower === '.تشخيص') {
@@ -422,9 +420,18 @@ async function startBot() {
           await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: كلمة تبنيد / تخريب / هكر\n🔄 تم تغيير اسم القروب');
           continue;
         }
+        // ===== هنا التعديل الجديد: اعادة التوجيه تقفل القروب من اول مرة =====
         if (isForward) {
           await deleteMsg(from, m.key);
-          await kickAndRename(from, sender, 'فوروارد');
+          if (!forwardedLocked[from]) {
+            forwardedLocked[from] = true;
+            await sock.groupSettingUpdate(from, 'announcement').catch(()=>{});
+            await sock.groupRevokeInvite(from).catch(()=>{});
+            await notifyOwner('🚨 اعادة توجيه من ' + senderNum + ' في قروب ' + from + ' - سكرت القروب والغيت الرابط');
+            setTimeout(async () => { try { await sock.groupSettingUpdate(from, 'not_announcement'); } catch(e) {} forwardedLocked[from] = false; }, 3*60*1000);
+          }
+          if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
+          await kickAndRename(from, sender, 'فوروارد - محاولة تبنيد');
           await notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: إعادة توجيه\n🔄 تم تغيير اسم القروب');
           continue;
         }
@@ -472,6 +479,7 @@ async function startBot() {
 }
 app.get('/', (req, res) => res.send('Bot Running'));
 app.get('/qr', async (req, res) => {
+  if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
   const img = await qrcode.toDataURL(qrCode);
   res.send('<img src="' + img + '"><h2>Scan QR</h2>');
