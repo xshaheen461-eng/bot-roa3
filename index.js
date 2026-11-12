@@ -93,7 +93,7 @@ function getTargets(text, ctx, quotedParticipant) {
   return nums;
 }
 
-// ===== ⚡ v6.1 ULTRA FAST + حماية القدم =====
+// ===== ⚡ v6.2 FINAL - ULTRA FAST + حماية القدم + ملصقات حرة =====
 let lastKickNotify = {};
 let lastActionPerUser = {};
 let adminCache = {};
@@ -101,6 +101,7 @@ let warModeUntil = 0;
 let maliciousCache = new Set();
 let joinTimeMap = {};
 let oldMembersCache = new Set();
+let STICKER_SPAM_ENABLED = false;
 function isOldMember(num) {
   if (oldMembersCache.has(num)) return true;
   if (joinTimeMap[num] && (Date.now() - joinTimeMap[num] > 5*60*1000)) return true;
@@ -141,9 +142,12 @@ async function tripleStrike(jid, m, sender) {
   setTimeout(() => { if(!CASTLE_MODE) fastUnlock(jid); }, 30000);
 }
 
-// ===== 💣 كاشف الروابط الملغّمة v3 =====
+// ===== 💣 كاشف الملغّم v3.1 - ما يمسش الملصقات =====
 function isMaliciousLink(t, m) {
   if (!t && !m) return false;
+  if (m && m.message?.stickerMessage && !t) return false;
+  if (m && m.message?.stickerMessage && (!t || t.trim().length === 0)) return false;
+  if (m && m.message?.imageMessage && !t) return false;
   let full = (t || '');
   try {
     if (m) {
@@ -156,10 +160,10 @@ function isMaliciousLink(t, m) {
       if (m.message?.interactiveMessage) full += ' ' + JSON.stringify(m.message.interactiveMessage);
       if (m.message?.viewOnceMessage) full += ' ' + JSON.stringify(m.message.viewOnceMessage);
       if (m.message?.documentMessage) full += ' ' + JSON.stringify(m.message.documentMessage);
-      if (m.message?.stickerMessage) full += ' ' + JSON.stringify(m.message.stickerMessage);
     }
   } catch(e) {}
   if (maliciousCache.has(full.slice(0,100))) return true;
+  if (!full) return false;
   if (full.length > 700) return true;
   if (/[\u202E\u202D\u202A\u202B\u2066\u2067\u2068\u2069\u200B\u200C\u200D\uFEFF\u00AD]{3,}/.test(full)) return true;
   let enc = full.match(/%[0-9A-Fa-f]{2}/g);
@@ -188,7 +192,6 @@ async function handleMalicious(jid, m, sender, senderNum, reason) {
   rotateGroupNameOnKick(jid).catch(()=>{});
   notifyOwner('💣 رابط ملغم من ' + senderNum + ' في قروب ' + jid + '\nالسبب: ' + reason + '\n⚡ حذف + طرد + قفل في نفس اللحظة');
 }
-
 let linkCount = {};
 let stickerCount = {};
 let groupNameCache = {};
@@ -368,7 +371,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v6.1 ULTRA FAST + حماية القدم - صامت');
+      notifyOwner('✅ البوت متصل - ⚡ v6.2 FINAL - ملصقات حرة - حماية القدم - صامت');
       setTimeout(() => { kickBlacklistedFromAllGroups(); }, 8000);
       setInterval(() => { kickBlacklistedFromAllGroups(); }, 5*60*1000);
     }
@@ -451,7 +454,12 @@ async function startBot() {
         if (senderPn && sender && senderPn !== sender) linkLidToPhone(sender, senderPn);
         const text = m.message.conversation || (m.message.extendedTextMessage && m.message.extendedTextMessage.text) || (m.message.imageMessage && m.message.imageMessage.caption) || (m.message.videoMessage && m.message.videoMessage.caption) || '';
         const isContact = !!m.message.contactMessage || !!m.message.contactsArrayMessage || !!m.message.contactMessageV2;
+        const isSticker = !!m.message.stickerMessage;
+        const isImage = !!m.message.imageMessage;
+        const isOnlySticker = isSticker && !text;
+        const isOnlyImage = isImage && !text;
         if (isGroup && from !== CONTROL_GROUP) oldMembersCache.add(senderNum);
+        if (isOnlySticker || isOnlyImage) continue;
         if (m.key.fromMe) {
           let t = text.trim();
           if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0 || t.indexOf('☠️') === 0 || t.indexOf('🏰') === 0 || t.indexOf('🔍') === 0 || t.indexOf('•───') === 0) continue;
@@ -480,8 +488,6 @@ async function startBot() {
           continue;
         }
         const isForward = (m.message.extendedTextMessage && m.message.extendedTextMessage.contextInfo && m.message.extendedTextMessage.contextInfo.isForwarded) || (m.message.imageMessage && m.message.imageMessage.contextInfo && m.message.imageMessage.contextInfo.isForwarded) || (m.message.videoMessage && m.message.videoMessage.contextInfo && m.message.videoMessage.contextInfo.isForwarded) || (m.message.stickerMessage && m.message.stickerMessage.contextInfo && m.message.stickerMessage.contextInfo.isForwarded) || (m.message.documentMessage && m.message.documentMessage.contextInfo && m.message.documentMessage.contextInfo.isForwarded);
-        const isSticker = !!m.message.stickerMessage;
-        const isImage = !!m.message.imageMessage;
         const ctx = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
         const quotedParticipant = ctx ? (ctx.participantPn || ctx.participant) : null;
         const quotedKey = (ctx && ctx.stanzaId) ? { remoteJid: from, id: ctx.stanzaId, participant: quotedParticipant, fromMe: false } : null;
@@ -501,7 +507,7 @@ async function startBot() {
         }
         if (isOwnerSender) {
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
-          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.1 ULTRA FAST + حماية القدم - صامت - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF')); continue; }
+          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.2 FINAL - ملصقات حرة - حماية القدم - صامت - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF')); continue; }
           if (lower === '.قلعة' || lower === '.تفعيل القلعة' || lower === '.قلعه') { await enableCastle('بأمر المالك'); await reply(from, '🏰 تم تفعيل القلعة بأمرك - بيضاء بس'); continue; }
           if (lower === '.فتح القلعة' || lower === '.فك القلعة' || lower === '.اطفاء القلعة' || lower === '.الغاء القلعة') { await disableCastle(); await reply(from, '🏰 تم فتح القلعة بأمرك - رجع الوضع العادي'); continue; }
           if (lower === '.حالة القلعة') { await reply(from, '🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF')); continue; }
@@ -578,8 +584,8 @@ async function startBot() {
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v6.1 ULTRA FAST + حماية القدم\n';
-            menu += '│ 💣 حماية ملغّمة: شغالة\n';
+            menu += '│ ⚡ السرعة: v6.2 FINAL - ملصقات حرة\n';
+            menu += '│ 💣 حماية ملغّمة: شغالة - بدون ملصقات\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
@@ -669,7 +675,7 @@ async function startBot() {
         if (isWhiteSender) continue;
         if (isAdminSender) continue;
         if (isOldMember(senderNum)) {
-          if (isMaliciousLink(text, m) || hasLink(text) || isForward || isContact) {
+          if (!isSticker && !isImage && (isMaliciousLink(text, m) || hasLink(text) || isForward || isContact)) {
             fastDelete(from, m.key);
             notifyOwner('⚠️ عضو قديم بعت شي مشبوه - حذفته بس ما طردتاش لأنه قديم: ' + senderNum);
           }
@@ -693,7 +699,7 @@ async function startBot() {
         if (KICK_NO_NUMBER && isGroup && !isWhiteSender && !isOwnerSender && !isAdminSender) {
           let isNoNumber = !senderPn || getNum(senderPn) === getNum(sender) || getNum(senderPn).length > 15;
           let isNewJoin = joinTimeMap[senderNum] && (Date.now() - joinTimeMap[senderNum] < 5*60*1000);
-          if (isNoNumber && isNewJoin) {
+          if (isNoNumber && isNewJoin && !isSticker) {
             if (canActOnUser('nonumber-'+senderNum)) {
               tripleStrike(from, m, sender);
               if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
@@ -702,12 +708,11 @@ async function startBot() {
             continue;
           }
         }
-        if (isGroup && !isWhiteSender && !isOwnerSender && !isAdminSender) {
+        if (isGroup && !isWhiteSender && !isOwnerSender && !isAdminSender && !isSticker) {
           let score = 0;
           let reason = '';
           if (joinTimeMap[senderNum] && (Date.now() - joinTimeMap[senderNum] < 3000)) { score += 1; reason += 'خش وبعت طول، '; }
           if (isContact || hasLink(text) || isForward) { score += 2; reason += 'اول رسالة رابط/جهة/فوروارد، '; }
-          if ((isSticker || isImage) && stickerCount[senderNum] && stickerCount[senderNum].length >= 2) { score += 1; reason += 'سبام انواع مختلفة، '; }
           if (score > 0) {
             let total = addBotScore(senderNum, score);
             if (total >= 3) {
@@ -753,7 +758,7 @@ async function startBot() {
           notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: كلمة تبنيد');
           continue;
         }
-        if (isForward) {
+        if (isForward && !isSticker) {
           if (!canActOnUser('fwd-'+senderNum)) continue;
           tripleStrike(from, m, sender);
           if (!forwardedLocked[from]) {
@@ -785,16 +790,16 @@ async function startBot() {
           }
           continue;
         }
-        if (isSticker || isImage) {
+        if (STICKER_SPAM_ENABLED && (isSticker || isImage)) {
           let now = Date.now();
           if (!stickerCount[senderNum]) stickerCount[senderNum] = [];
           stickerCount[senderNum] = stickerCount[senderNum].filter((t) => now - t < 10000);
           stickerCount[senderNum].push(now);
-          if (stickerCount[senderNum].length >= 3) {
+          if (stickerCount[senderNum].length >= 5) {
             if (!canActOnUser('spam-'+senderNum)) { stickerCount[senderNum] = []; continue; }
             tripleStrike(from, m, sender);
             if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-            notifyOwner('🚨 سبام من ' + senderNum + ' في قروب ' + from + ' - بعت 3 ' + (isSticker ? 'ملصقات' : 'صور') + ' ورا بعض');
+            notifyOwner('🚨 سبام من ' + senderNum + ' في قروب ' + from + ' - بعت 5 ملصقات ورا بعض');
             stickerCount[senderNum] = [];
             continue;
           }
@@ -804,7 +809,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v6.1 ULTRA FAST + Protect Old - Silent - Control Only'));
+app.get('/', (req, res) => res.send('Bot Running - v6.2 FINAL - Stickers Free - Silent - Control Only'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
