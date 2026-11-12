@@ -16,6 +16,8 @@ let CASTLE_MODE = false;
 let RAID_MODE = false;
 let raidTimer = null;
 let contactTimes = [];
+let ACCEPT_MODE = false;
+let acceptTimer = null;
 try { whiteList = JSON.parse(fs.readFileSync('whitelist.json')); } catch(e) {}
 try { blackList = JSON.parse(fs.readFileSync('blacklist.json')); } catch(e) {}
 try { let s = JSON.parse(fs.readFileSync('settings.json')); lockLinks = s.lockLinks || false; CASTLE_MODE = false; } catch(e) {}
@@ -93,7 +95,7 @@ function getTargets(text, ctx, quotedParticipant) {
   return nums;
 }
 
-// ===== ⚡ v6.2 FINAL - ULTRA FAST + حماية القدم + ملصقات حرة =====
+// ===== ⚡ v6.3 - ULTRA FAST + حماية القدم + ملصقات حرة + استقبال =====
 let lastKickNotify = {};
 let lastActionPerUser = {};
 let adminCache = {};
@@ -141,8 +143,6 @@ async function tripleStrike(jid, m, sender) {
   ]);
   setTimeout(() => { if(!CASTLE_MODE) fastUnlock(jid); }, 30000);
 }
-
-// ===== 💣 كاشف الملغّم v3.1 - ما يمسش الملصقات =====
 function isMaliciousLink(t, m) {
   if (!t && !m) return false;
   if (m && m.message?.stickerMessage && !t) return false;
@@ -274,11 +274,13 @@ async function sendSessionReport(jid, participant, isClean) {
     let d = new Date();
     let time = d.toLocaleTimeString('en-GB') + ',' + d.toLocaleDateString('en-GB');
     let groupName = await getGroupName(jid);
+    let num = getNum(participant);
     let report = '';
     report += '•───⊙ ( 🪶 ) ⊙───•\n\n';
     report += '#. | اسم الجروب ~ 『 ' + groupName + ' 』\n';
     report += '#. | الحالة ~ 『 رصد طلب انضمام جديد ⚠️ 』\n\n';
     report += '👤 [ @مستخدم غير معروف ] ،\nقدم طلب انضمام إلى المجموعة.\n\n';
+    report += '🔢 الرقم / ID: ' + num + '\n\n';
     if (isClean) {
       report += '🪶 تقرير فحص الجلسات والأجهزة:\n✅ حساب نظيف (بدون جلسات إضافية مسجلة)\n\n';
     } else {
@@ -371,7 +373,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v6.2 FINAL - ملصقات حرة - حماية القدم - صامت');
+      notifyOwner('✅ البوت متصل - ⚡ v6.3 - استقبال آمن - ملصقات حرة - حماية القدم');
       setTimeout(() => { kickBlacklistedFromAllGroups(); }, 8000);
       setInterval(() => { kickBlacklistedFromAllGroups(); }, 5*60*1000);
     }
@@ -387,10 +389,19 @@ async function startBot() {
       if (jid === CONTROL_GROUP) return;
       let now = Date.now();
       for (let p of u.participants) joinTimeMap[getNum(p)] = now;
+      // ✅ وضع الاستقبال: ما نطردش حد، لكن نبعت القسيمة لكل واحد
+      if (ACCEPT_MODE) {
+        for (let p of u.participants) {
+          let n = getNum(p);
+          let hasPhone = (typeof p === 'object' && p.phoneNumber) ? true : false;
+          sendSessionReport(jid, p, hasPhone);
+        }
+        return;
+      }
       if (!joinTimes[jid]) joinTimes[jid] = [];
       joinTimes[jid] = joinTimes[jid].filter((t) => now - t < 60000);
       u.participants.forEach(() => joinTimes[jid].push(now));
-      if (joinTimes[jid].length >= 2) {
+      if (joinTimes[jid].length >= 10) {
         RAID_MODE = true;
         await safeLock(jid, 10);
         for (const p of u.participants) {
@@ -507,7 +518,20 @@ async function startBot() {
         }
         if (isOwnerSender) {
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
-          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.2 FINAL - ملصقات حرة - حماية القدم - صامت - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF')); continue; }
+          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.3 - استقبال آمن - ملصقات حرة - حماية القدم - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF')); continue; }
+          if (lower === '.استقبال' || lower === '.قبول' || lower === '.استقبال شغال') {
+            ACCEPT_MODE = true;
+            clearTimeout(acceptTimer);
+            acceptTimer = setTimeout(()=>{ ACCEPT_MODE = false; notifyOwner('✅ انتهى وضع الاستقبال - رجعت الحماية'); }, 15*60*1000);
+            await reply(from, '✅ وضع الاستقبال شغال 15 دقيقة - اقبل اللي تبيه، البوت معاش حيطرد حد على خاطر دخول جماعي، لكن حيبعتلك القسيمة لكل واحد يخش');
+            continue;
+          }
+          if (lower === '.تم القبول' || lower === '.سكر الاستقبال' || lower === '.خلاص استقبال' || lower === '.انهاء الاستقبال') {
+            ACCEPT_MODE = false;
+            clearTimeout(acceptTimer);
+            await reply(from, '✅ سكرت الاستقبال - رجعت الحماية');
+            continue;
+          }
           if (lower === '.قلعة' || lower === '.تفعيل القلعة' || lower === '.قلعه') { await enableCastle('بأمر المالك'); await reply(from, '🏰 تم تفعيل القلعة بأمرك - بيضاء بس'); continue; }
           if (lower === '.فتح القلعة' || lower === '.فك القلعة' || lower === '.اطفاء القلعة' || lower === '.الغاء القلعة') { await disableCastle(); await reply(from, '🏰 تم فتح القلعة بأمرك - رجع الوضع العادي'); continue; }
           if (lower === '.حالة القلعة') { await reply(from, '🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF')); continue; }
@@ -584,12 +608,13 @@ async function startBot() {
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v6.2 FINAL - ملصقات حرة\n';
+            menu += '│ ⚡ السرعة: v6.3 - استقبال آمن\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - بدون ملصقات\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
+            menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
-            menu += '• .ايدي\n• .تشخيص\n• .فحص / .عد - الجدد بس، القدم محميين\n• رد + .ابيض / .حظر / .طرد / .فك حظر\n• تاق @ + .ابيض / .حظر\n• ارقام + .ابيض / .حظر\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping\n• كل الردود تجي في قروب التحكم بس';
+            menu += '• .ايدي\n• .تشخيص\n• .استقبال / .تم القبول - لقبول جماعي بدون طرد\n• .فحص / .عد - الجدد بس، القدم محميين\n• رد + .ابيض / .حظر / .طرد / .فك حظر\n• تاق @ + .ابيض / .حظر\n• ارقام + .ابيض / .حظر\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping\n• كل الردود تجي في قروب التحكم بس';
             await reply(from, menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
@@ -809,7 +834,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v6.2 FINAL - Stickers Free - Silent - Control Only'));
+app.get('/', (req, res) => res.send('Bot Running - v6.3 Safe Accept - Silent - Control Only'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
