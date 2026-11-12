@@ -18,6 +18,8 @@ let raidTimer = null;
 let contactTimes = [];
 let ACCEPT_MODE = false;
 let acceptTimer = null;
+let knownMembers = {};
+let reportedMembers = new Set();
 try { whiteList = JSON.parse(fs.readFileSync('whitelist.json')); } catch(e) {}
 try { blackList = JSON.parse(fs.readFileSync('blacklist.json')); } catch(e) {}
 try { let s = JSON.parse(fs.readFileSync('settings.json')); lockLinks = s.lockLinks || false; CASTLE_MODE = false; } catch(e) {}
@@ -94,8 +96,6 @@ function getTargets(text, ctx, quotedParticipant) {
   for (let n of extractAllNumbers(text)) add(n);
   return nums;
 }
-
-// ===== ⚡ v6.3 - ULTRA FAST + حماية القدم + ملصقات حرة + استقبال =====
 let lastKickNotify = {};
 let lastActionPerUser = {};
 let adminCache = {};
@@ -275,6 +275,10 @@ async function sendSessionReport(jid, participant, isClean) {
     let time = d.toLocaleTimeString('en-GB') + ',' + d.toLocaleDateString('en-GB');
     let groupName = await getGroupName(jid);
     let num = getNum(participant);
+    let dedupKey = jid + '_' + num;
+    if (reportedMembers.has(dedupKey)) return;
+    reportedMembers.add(dedupKey);
+    setTimeout(()=>{ reportedMembers.delete(dedupKey); }, 60*60*1000);
     let report = '';
     report += '•───⊙ ( 🪶 ) ⊙───•\n\n';
     report += '#. | اسم الجروب ~ 『 ' + groupName + ' 』\n';
@@ -373,79 +377,135 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v6.3 - استقبال آمن - ملصقات حرة - حماية القدم');
+      notifyOwner('✅ البوت متصل - ⚡ v6.5 - طرد LID شغال + فحص الكل + ملصقات حرة');
       setTimeout(() => { kickBlacklistedFromAllGroups(); }, 8000);
       setInterval(() => { kickBlacklistedFromAllGroups(); }, 5*60*1000);
+      setInterval(async () => {
+        try {
+          const groups = await sock.groupFetchAllParticipating();
+          for (let jid in groups) {
+            if (jid === CONTROL_GROUP) continue;
+            const meta = groups[jid];
+            if (!knownMembers[jid]) {
+              knownMembers[jid] = new Set(meta.participants.map(p => getNum(p.id)));
+              continue;
+            }
+            for (let p of meta.participants) {
+              let n = getNum(p.id);
+              if (!knownMembers[jid].has(n)) {
+                knownMembers[jid].add(n);
+                joinTimeMap[n] = Date.now();
+                let hasPhone = !!p.phoneNumber;
+                sendSessionReport(jid, p, hasPhone);
+                if (!ACCEPT_MODE && !hasPhone && !isWhite(n) && !isOwner(n)) {
+                  if (p.admin) continue;
+                  fastKick(jid, p.id);
+                  if (blackList.indexOf(n) === -1) { blackList.push(n); saveLists(); }
+                }
+              }
+            }
+          }
+        } catch(e) {}
+      }, 60*1000);
     }
     if (u.connection === 'close') {
       const should = (u.lastDisconnect && u.lastDisconnect.error && u.lastDisconnect.error.output && u.lastDisconnect.error.output.statusCode) !== DisconnectReason.loggedOut;
       if (should) startBot();
     }
   });
+  const handleMembershipApproval = async (u) => {
+    try {
+      const jid = u.id;
+      if (!jid || jid === CONTROL_GROUP) return;
+      let parts = u.participants || [];
+      for (let p of parts) {
+        let n = getNum(typeof p === 'string' ? p : (p.id || p));
+        joinTimeMap[n] = Date.now();
+        let hasPhone = (typeof p === 'object' && !!p.phoneNumber);
+        if (typeof p === 'string' && p.includes('@lid')) hasPhone = false;
+        sendSessionReport(jid, p, hasPhone);
+        if (!ACCEPT_MODE && !hasPhone && !isWhite(n) && !isOwner(n)) {
+          fastKick(jid, typeof p === 'string' ? p : p.id);
+          if (blackList.indexOf(n) === -1) { blackList.push(n); saveLists(); }
+          notifyOwner('☠️ طردت ' + n + ' من قروب ' + jid + '\nالسبب: قبلته من الاستقبال وطلع من غير رقم');
+        }
+      }
+    } catch(e) { console.log('Membership Error:', e.message); }
+  };
+  sock.ev.on('group-membership.update', handleMembershipApproval);
+  sock.ev.on('group.join-request', handleMembershipApproval);
   sock.ev.on('group-participants.update', async (u) => {
     try {
-      if (u.action !== 'add') return;
-      const jid = u.id;
-      if (jid === CONTROL_GROUP) return;
-      let now = Date.now();
-      for (let p of u.participants) joinTimeMap[getNum(p)] = now;
-      // ✅ وضع الاستقبال: ما نطردش حد، لكن نبعت القسيمة لكل واحد
-      if (ACCEPT_MODE) {
+      if (u.action === 'add' || u.action === 'invite' || u.action === 'join') {
+        const jid = u.id;
+        if (jid === CONTROL_GROUP) return;
+        let now = Date.now();
+        for (let p of u.participants) joinTimeMap[getNum(p)] = now;
+        if (ACCEPT_MODE) {
+          for (let p of u.participants) {
+            let hasPhone = (typeof p === 'object' && p.phoneNumber) ? true : false;
+            if (typeof p === 'string' && p.includes('@lid')) hasPhone = false;
+            sendSessionReport(jid, p, hasPhone);
+          }
+          return;
+        }
+        if (!joinTimes[jid]) joinTimes[jid] = [];
+        joinTimes[jid] = joinTimes[jid].filter((t) => now - t < 60000);
+        u.participants.forEach(() => joinTimes[jid].push(now));
+        if (joinTimes[jid].length >= 10) {
+          RAID_MODE = true;
+          await safeLock(jid, 10);
+          for (const p of u.participants) {
+            if (isWhiteParticipant(p)) continue;
+            if (!isOwner(getNum(p)) && !isWhite(getNum(p))) {
+              let hasPh = (typeof p === 'object' && p.phoneNumber) ? true : false;
+              sendSessionReport(jid, p, hasPh);
+              if (isOldMember(getNum(p))) continue;
+              kickAndRename(jid, p, 'هجوم منسق');
+              if (blackList.indexOf(getNum(p)) === -1) blackList.push(getNum(p));
+            }
+          }
+          saveLists();
+          notifyOwner('🚨🚨 هجوم منسق على قروب ' + jid + ' - دخل ' + joinTimes[jid].length + ' في اقل من دقيقة - سكرت 10 دقايق وطردتهم');
+          joinTimes[jid] = [];
+          clearTimeout(raidTimer);
+          raidTimer = setTimeout(()=>{ RAID_MODE = false; }, 10*60*1000);
+          return;
+        }
         for (let p of u.participants) {
           let n = getNum(p);
           let hasPhone = (typeof p === 'object' && p.phoneNumber) ? true : false;
+          if (typeof p === 'string' && p.includes('@lid')) hasPhone = false;
           sendSessionReport(jid, p, hasPhone);
-        }
-        return;
-      }
-      if (!joinTimes[jid]) joinTimes[jid] = [];
-      joinTimes[jid] = joinTimes[jid].filter((t) => now - t < 60000);
-      u.participants.forEach(() => joinTimes[jid].push(now));
-      if (joinTimes[jid].length >= 10) {
-        RAID_MODE = true;
-        await safeLock(jid, 10);
-        for (const p of u.participants) {
-          if (isWhiteParticipant(p)) continue;
-          if (!isOwner(getNum(p)) && !isWhite(getNum(p))) {
-            let hasPh = (typeof p === 'object' && p.phoneNumber) ? true : false;
-            sendSessionReport(jid, p, hasPh);
-            if (isOldMember(getNum(p))) continue;
-            kickAndRename(jid, p, 'هجوم منسق');
-            if (blackList.indexOf(getNum(p)) === -1) blackList.push(getNum(p));
+          if (isOldMember(n)) continue;
+          if (CASTLE_MODE && !isWhite(n) && !isOwner(n)) {
+            fastLock(jid);
+            fastKick(jid, p);
+            if (blackList.indexOf(n) === -1) { blackList.push(n); saveLists(); }
+            continue;
           }
-        }
-        saveLists();
-        notifyOwner('🚨🚨 هجوم منسق على قروب ' + jid + ' - دخل ' + joinTimes[jid].length + ' في اقل من دقيقة - سكرت 10 دقايق وطردتهم');
-        joinTimes[jid] = [];
-        clearTimeout(raidTimer);
-        raidTimer = setTimeout(()=>{ RAID_MODE = false; }, 10*60*1000);
-        return;
-      }
-      for (let p of u.participants) {
-        let n = getNum(p);
-        let hasPhone = (typeof p === 'object' && p.phoneNumber) ? true : false;
-        sendSessionReport(jid, p, hasPhone);
-        if (isOldMember(n)) continue;
-        if (CASTLE_MODE && !isWhite(n) && !isOwner(n)) {
-          fastLock(jid);
-          fastKick(jid, p);
-          if (blackList.indexOf(n) === -1) { blackList.push(n); saveLists(); }
-          continue;
-        }
-        if (KICK_NO_NUMBER && !isWhite(n) && !isOwner(n)) {
-          if (!hasPhone) {
-            if (joinTimeMap[n] && (Date.now() - joinTimeMap[n] < 5*60*1000)) {
-              fastLock(jid);
-              fastKick(jid, p);
-              if (blackList.indexOf(n) === -1) { blackList.push(n); saveLists(); }
+          if (KICK_NO_NUMBER && !isWhite(n) && !isOwner(n)) {
+            if (!hasPhone) {
+              if (joinTimeMap[n] && (Date.now() - joinTimeMap[n] < 5*60*1000)) {
+                fastLock(jid);
+                fastKick(jid, p);
+                if (blackList.indexOf(n) === -1) { blackList.push(n); saveLists(); }
+              }
+              continue;
             }
+          }
+          if (isBlack(n) && !isOwner(n) && !isWhite(n)) {
+            fastLock(jid);
+            fastKick(jid, p);
             continue;
           }
         }
-        if (isBlack(n) && !isOwner(n) && !isWhite(n)) {
-          fastLock(jid);
-          fastKick(jid, p);
-          continue;
+        return;
+      }
+      if (u.action === 'remove') {
+        for (let p of u.participants) {
+          let n = getNum(p);
+          if (knownMembers[u.id]) knownMembers[u.id].delete(n);
         }
       }
     } catch(e) { console.log('Raid Error:', e.message); }
@@ -518,7 +578,7 @@ async function startBot() {
         }
         if (isOwnerSender) {
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
-          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.3 - استقبال آمن - ملصقات حرة - حماية القدم - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF')); continue; }
+          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.5 - طرد LID شغال + فحص الكل - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF')); continue; }
           if (lower === '.استقبال' || lower === '.قبول' || lower === '.استقبال شغال') {
             ACCEPT_MODE = true;
             clearTimeout(acceptTimer);
@@ -535,6 +595,36 @@ async function startBot() {
           if (lower === '.قلعة' || lower === '.تفعيل القلعة' || lower === '.قلعه') { await enableCastle('بأمر المالك'); await reply(from, '🏰 تم تفعيل القلعة بأمرك - بيضاء بس'); continue; }
           if (lower === '.فتح القلعة' || lower === '.فك القلعة' || lower === '.اطفاء القلعة' || lower === '.الغاء القلعة') { await disableCastle(); await reply(from, '🏰 تم فتح القلعة بأمرك - رجع الوضع العادي'); continue; }
           if (lower === '.حالة القلعة') { await reply(from, '🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF')); continue; }
+          if (lower === '.فحص الكل' || lower === '.فحص كل' || lower === '.تنظيف الكل' || lower === '.تنظيف') {
+            if (!isGroup) { await reply(from, '⚠️ الفحص يخدم في القروب بس'); continue; }
+            try {
+              let meta = await sock.groupMetadata(from);
+              let me = null;
+              for (let p of meta.participants) { if (isMe(p)) me = p; }
+              let iAmAdmin = me && me.admin;
+              if (!iAmAdmin) { await reply(from, '⚠️ البوت مش أدمن هنا، ما يقدرش يطرد'); continue; }
+              let noNumberList = [];
+              for (let p of meta.participants) {
+                let n = getParticipantNum(p);
+                if (p.admin) continue;
+                if (isMe(p)) continue;
+                if (isWhiteParticipant(p)) continue;
+                if (isOwner(n)) continue;
+                if (!p.phoneNumber) noNumberList.push(p);
+              }
+              let kickedList = [];
+              for (let p of noNumberList) {
+                let ok = await kickAndRename(from, p.id, 'فحص الكل');
+                if (ok) {
+                  kickedList.push(getParticipantNum(p));
+                  if (blackList.indexOf(getParticipantNum(p)) === -1) blackList.push(getParticipantNum(p));
+                }
+              }
+              saveLists();
+              await reply(from, '🏰 فحص الكل كمل:\n👥 فحصت: ' + meta.participants.length + '\n👻 من غير رقم لقيت: ' + noNumberList.length + '\n✅ طردت: ' + kickedList.length + '\n\n' + (kickedList.length ? kickedList.join('\n') : '✅ نظيف'));
+            } catch(e) { await reply(from, 'خطأ فحص الكل: ' + e.message); }
+            continue;
+          }
           if (lower === '.فحص' || lower === '.فحص مشبوهين' || lower === '.فحص بوتات' || lower === '.عد' || lower === '.كم') {
             if (!isGroup) { await reply(from, '⚠️ الفحص يخدم في القروب بس'); continue; }
             try {
@@ -551,7 +641,8 @@ async function startBot() {
                 if (isMe(p)) continue;
                 if (isWhiteParticipant(p)) continue;
                 if (isOwner(n)) continue;
-                if (isOldMember(n)) continue;
+                let isNewAccepted = joinTimeMap[n] && (Date.now() - joinTimeMap[n] < 24*60*60*1000);
+                if (!isNewAccepted && isOldMember(n)) continue;
                 if (!p.phoneNumber) noNumberList.push(n);
                 else if (isBlack(n)) blackListFound.push(n);
               }
@@ -560,9 +651,8 @@ async function startBot() {
                 msg += '👥 اجمالي الاعضاء: ' + total + '\n';
                 msg += '👻 جدد من غير رقم: ' + noNumberList.length + '\n';
                 msg += '🚫 من البلاك: ' + blackListFound.length + '\n';
-                msg += '🛡️ القدم محميين: ما نحسبوش فيهم\n\n';
-                if (noNumberList.length) msg += '👻 جدد من غير رقم:\n' + noNumberList.join('\n') + '\n\n';
-                if (blackListFound.length) msg += '🚫 بلاك:\n' + blackListFound.join('\n');
+                if (noNumberList.length) msg += '\n👻 جدد من غير رقم:\n' + noNumberList.join('\n') + '\n';
+                if (blackListFound.length) msg += '\n🚫 بلاك:\n' + blackListFound.join('\n');
                 if (!noNumberList.length && !blackListFound.length) msg += '✅ القروب نظيف';
                 else msg += '\n⚠️ خلي البوت ادمن باش يطردهم، توا عد بس';
                 await reply(from, msg);
@@ -579,7 +669,7 @@ async function startBot() {
                 }
               }
               saveLists();
-              let msg2 = '🏰 فحص كمل:\n👥 فحصت: ' + total + '\n👻 جدد من غير رقم لقيت: ' + noNumberList.length + '\n🚫 بلاك لقيت: ' + blackListFound.length + '\n✅ طردت: ' + kickedList.length + '\n🛡️ القدم محميين - ما طردت منهم حد';
+              let msg2 = '🏰 فحص كمل:\n👥 فحصت: ' + total + '\n👻 جدد من غير رقم لقيت: ' + noNumberList.length + '\n🚫 بلاك لقيت: ' + blackListFound.length + '\n✅ طردت: ' + kickedList.length;
               if (kickedList.length) msg2 += '\n\n' + kickedList.join('\n');
               await reply(from, msg2);
               notifyOwner('🏰 فحص في ' + from + ' - لقيت ' + noNumberList.length + ' جدد من غير رقم وطردت ' + kickedList.length);
@@ -608,13 +698,13 @@ async function startBot() {
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v6.3 - استقبال آمن\n';
+            menu += '│ ⚡ السرعة: v6.5 - طرد LID شغال + فحص الكل\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - بدون ملصقات\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
-            menu += '• .ايدي\n• .تشخيص\n• .استقبال / .تم القبول - لقبول جماعي بدون طرد\n• .فحص / .عد - الجدد بس، القدم محميين\n• رد + .ابيض / .حظر / .طرد / .فك حظر\n• تاق @ + .ابيض / .حظر\n• ارقام + .ابيض / .حظر\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping\n• كل الردود تجي في قروب التحكم بس';
+            menu += '• .ايدي\n• .تشخيص\n• .استقبال / .تم القبول\n• .فحص - الجدد بس\n• .فحص الكل - حتى القدم من غير رقم\n• رد + .ابيض / .حظر / .طرد / .فك حظر\n• تاق @ + .ابيض / .حظر\n• ارقام + .ابيض / .حظر\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping';
             await reply(from, menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
@@ -641,14 +731,30 @@ async function startBot() {
           if (lower === '.حذف بلاك') { blackList = []; saveLists(); await reply(from, '✅ مسحت البلاك كله'); continue; }
           if (lower.indexOf('.طرد') === 0) {
             if (!isGroup) { await reply(from, '⚠️ الطرد يخدم في القروب بس'); continue; }
-            let targets = getTargets(text, ctx, quotedParticipant);
-            if (targets.length) {
-              let target = targets[0];
-              if (isWhite(target)) { await reply(from, '🤍 تعذر، لأنه في القائمة البيضاء'); continue; }
-              await kickAndRename(from, target + '@s.whatsapp.net', 'طرد يدوي');
-              if (blackList.indexOf(target) === -1) { blackList.push(target); saveLists(); }
-              notifyOwner('🚨 طردت ' + target + ' من قروب ' + from);
-            } else { await reply(from, '⚠️ رد على رسالة الشخص ولا تاقيه ولا ابعث رقمه'); }
+            let targetJid = null;
+            if (quotedParticipant) targetJid = quotedParticipant;
+            else if (ctx && ctx.mentionedJid && ctx.mentionedJid.length) targetJid = ctx.mentionedJid[0];
+            else {
+              let tgs = getTargets(text, ctx, quotedParticipant);
+              if (tgs.length) targetJid = tgs[0] + '@s.whatsapp.net';
+            }
+            if (!targetJid) { await reply(from, '⚠️ رد على رسالة الشخص ولا تاقيه ولا ابعث رقمه'); continue; }
+            let targetNum = getNum(targetJid);
+            if (isWhite(targetNum)) { await reply(from, '🤍 تعذر، لأنه في القائمة البيضاء'); continue; }
+            let ok = false;
+            try { ok = await kickAndRename(from, targetJid, 'طرد يدوي'); } catch(e) {}
+            if (!ok && targetJid.includes('@s.whatsapp.net')) {
+              try { ok = await kickAndRename(from, targetNum + '@lid', 'طرد يدوي LID'); } catch(e) {}
+            }
+            if (!ok && targetJid.includes('@lid')) {
+              try { ok = await kickAndRename(from, targetNum + '@s.whatsapp.net', 'طرد يدوي PN'); } catch(e) {}
+            }
+            if (ok) {
+              if (blackList.indexOf(targetNum) === -1) { blackList.push(targetNum); saveLists(); }
+              notifyOwner('🚨 طردت ' + targetNum + ' من قروب ' + from);
+            } else {
+              await reply(from, '❌ فشل الطرد - تأكد ان البوت أدمن، والشخص مش أدمن، وجرب ترد على رسالته مباشرة');
+            }
             continue;
           }
           if (lower.indexOf('.فك حظر') !== -1 || lower.indexOf('.الغاء حظر') !== -1 || lower.indexOf('.الغاء بلاك') !== -1) {
@@ -834,7 +940,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v6.3 Safe Accept - Silent - Control Only'));
+app.get('/', (req, res) => res.send('Bot Running - v6.5 Kick LID + Check All - Silent - Control Only'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
