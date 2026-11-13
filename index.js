@@ -179,10 +179,33 @@ function isMaliciousLink(t, m) {
   if (low.includes('wa.me/') && low.includes('%0a')) return true;
   return false;
 }
+// ✅ v6.8 - دالة جديدة: تجيب السبب + شن بعت، باش كل رسالة تقول علاش
+function getMsgPreview(m, text) {
+  let t = (text || m?.message?.conversation || m?.message?.extendedTextMessage?.text || '').trim();
+  if (t) return t.slice(0, 200);
+  if (m?.message?.contactMessage) return '[جهة اتصال: ' + (m.message.contactMessage.displayName || m.message.contactMessage.vcard?.slice(0,80) || '') + ']';
+  if (m?.message?.contactsArrayMessage) return '[عدة جهات اتصال]';
+  if (m?.message?.imageMessage) return '[صورة] ' + (m.message.imageMessage.caption || '');
+  if (m?.message?.videoMessage) return '[فيديو] ' + (m.message.videoMessage.caption || '');
+  if (m?.message?.documentMessage) return '[ملف: ' + (m.message.documentMessage.fileName || '') + ']';
+  if (m?.message?.stickerMessage) return '[ملصق]';
+  if (m?.message?.pollCreationMessage) return '[استطلاع: ' + (m.message.pollCreationMessage.name || '') + ']';
+  return '(بدون نص)';
+}
+function getReasonLabel(text, m, isForward, isContact) {
+  if (isMaliciousLink(text, m)) return 'رابط ملغم / تفجير 💣';
+  if (isContact) return 'جهة اتصال 🧹';
+  if (isForward) return 'رسالة معاد توجيهها - فوروارد ↪️';
+  if (hasLink(text)) return 'رابط 🔗';
+  if (text && text.length > 700) return 'رسالة طويلة جدا (تفجير)';
+  return 'شي مشبوه';
+}
 async function handleMalicious(jid, m, sender, senderNum, reason) {
+  let preview = getMsgPreview(m, '');
+  let gname = await getGroupName(jid);
   if (isOldMember(senderNum)) {
     fastDelete(jid, m.key);
-    notifyOwner('⚠️ عضو قديم بعت رابط ملغّم - حذفته بس ما طردتاش لأنه قديم\nالرقم: ' + senderNum + ' في قروب ' + jid);
+    notifyOwner('⚠️ عضو قديم بعت رابط ملغّم - حذفته بس ما طردتاش لأنه قديم\nالرقم: ' + senderNum + '\nالقروب: ' + gname + '\nالسبب: ' + reason + '\nشن بعت: ' + preview);
     return;
   }
   tripleStrike(jid, m, sender);
@@ -190,7 +213,7 @@ async function handleMalicious(jid, m, sender, senderNum, reason) {
   maliciousCache.add((m.message?.conversation || '').slice(0,100));
   warModeUntil = Date.now() + 30000;
   rotateGroupNameOnKick(jid).catch(()=>{});
-  notifyOwner('💣 رابط ملغم من ' + senderNum + ' في قروب ' + jid + '\nالسبب: ' + reason + '\n⚡ حذف + طرد + قفل في نفس اللحظة');
+  notifyOwner('💣 رابط ملغم من ' + senderNum + ' في قروب ' + gname + '\nالسبب: ' + reason + '\nشن بعت: ' + preview + '\n⚡ حذف + طرد + قفل في نفس اللحظة');
 }
 let linkCount = {};
 let stickerCount = {};
@@ -275,7 +298,6 @@ async function sendSessionReport(jid, participant, isClean) {
     let time = d.toLocaleTimeString('en-GB') + ',' + d.toLocaleDateString('en-GB');
     let groupName = await getGroupName(jid);
     let num = getNum(typeof participant === 'string' ? participant : (participant.id || participant));
-    // ✅ v6.7 - القسيمة تنبعت ديما، بدون منع تكرار
     let report = '';
     report += '•───⊙ ( 🪶 ) ⊙───•\n\n';
     report += '#. | اسم الجروب ~ 『 ' + groupName + ' 』\n';
@@ -375,7 +397,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v6.7 - القسيمة ديما + حظر جماعي + طرد LID');
+      notifyOwner('✅ البوت متصل - ⚡ v6.8 - يقول السبب + حظر جماعي + القسيمة ديما');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -559,7 +581,7 @@ async function startBot() {
         const isDangerous = DANGEROUS_COMMANDS.some(cmd => lower.includes(cmd));
         if (isDangerous && !isOwnerSender && !isOldMember(senderNum)) {
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-          notifyOwner('🛡️ محاولة استغلال ثغرة .ban من ' + senderNum);
+          notifyOwner('🛡️ محاولة استغلال ثغرة .ban من ' + senderNum + '\nشن بعت: ' + getMsgPreview(m, text));
           if (isGroup) {
             tripleStrike(from, m, sender);
           }
@@ -585,7 +607,7 @@ async function startBot() {
         }
         if (isOwnerSender) {
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
-          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.7 - القسيمة ديما + حظر جماعي - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF')); continue; }
+          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.8 - يقول السبب + حظر جماعي - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF')); continue; }
           if (lower === '.قسيمة' || lower === '.قسيمه' || lower === '.تجربة قسيمة') {
             await sendSessionReport(from, '999999999@test', false);
             await reply(from, '✅ بعت قسيمة تجريبية، شوف قروب التحكم');
@@ -710,7 +732,7 @@ async function startBot() {
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v6.7 - القسيمة ديما + حظر جماعي\n';
+            menu += '│ ⚡ السرعة: v6.8 - يقول السبب + حظر جماعي\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - بدون ملصقات\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
@@ -734,7 +756,7 @@ async function startBot() {
           if (lower === '.فتح الروابط') { lockLinks = false; saveLists(); await reply(from, '🔗 فتحت الروابط'); continue; }
           if (lower === '.حذف' && isGroup) {
             if (quotedParticipant && isWhite(getNum(quotedParticipant))) { await reply(from, '🤍 هذا في البيضاء'); continue; }
-            if (quotedKey) { await deleteMsg(from, quotedKey); notifyOwner('✅ تم الحذف في قروب ' + from); }
+            if (quotedKey) { await deleteMsg(from, quotedKey); notifyOwner('✅ تم الحذف في قروب ' + from + '\nشن بعت: ' + getMsgPreview(m, text)); }
             else { await reply(from, '⚠️ رد على الرسالة اللي تبي تحذفها'); }
             continue;
           }
@@ -763,7 +785,7 @@ async function startBot() {
             }
             if (ok) {
               if (blackList.indexOf(targetNum) === -1) { blackList.push(targetNum); saveLists(); }
-              notifyOwner('🚨 طردت ' + targetNum + ' من قروب ' + from);
+              notifyOwner('🚨 طردت ' + targetNum + ' من قروب ' + from + '\nالسبب: طرد يدوي بأمر المالك\nشن بعت: ' + getMsgPreview(m, text));
             } else {
               await reply(from, '❌ فشل الطرد - تأكد ان البوت أدمن، والشخص مش أدمن، وجرب ترد على رسالته مباشرة');
             }
@@ -787,7 +809,6 @@ async function startBot() {
           }
           if (lower.indexOf('.حظر الكل') !== -1 || lower.indexOf('.حظر جماعي') !== -1 || lower.indexOf('.حظر') !== -1 || lower.indexOf('.اضف بلاك') !== -1) {
             let nums = getTargets(text, ctx, quotedParticipant);
-            // ✅ v6.7 - الحظر الجماعي راجع: بدون حد، حتى 100+ رقم
             let inWhite = nums.filter((n) => isWhite(n));
             let toBan = nums.filter((n) => !isWhite(n));
             if (inWhite.length && toBan.length === 0) { await reply(from, '⛔ تعذر، لأنه في القائمة البيضاء'); continue; }
@@ -797,8 +818,7 @@ async function startBot() {
               await reply(from, '🚫 حظرت ' + toBan.length + ' رقم' + (inWhite.length ? '\n⚠️ تخطيت ' + inWhite.length + ' من البيضاء' : ''));
               let k = await kickBlacklistedFromAllGroups();
               if (k > 0) await reply(from, '✅ طردت ' + k + ' واحد');
-              // لو حظر جماعي كبير، نبهك
-              if (toBan.length >= 10) await notifyOwner('🚨 حظر جماعي: ' + toBan.length + ' رقم\nفي قروب ' + from);
+              if (toBan.length >= 10) await notifyOwner('🚨 حظر جماعي: ' + toBan.length + ' رقم\nفي قروب ' + from + '\nالسبب: حظر جماعي بأمر المالك');
             } else { await reply(from, '⚠️ رد على رسالته ولا تاقيه ولا ابعث رقمه + .حظر\nأو الصق قايمة أرقام واكتب .حظر'); }
             continue;
           }
@@ -823,7 +843,11 @@ async function startBot() {
         if (isOldMember(senderNum)) {
           if (!isSticker && !isImage && (isMaliciousLink(text, m) || hasLink(text) || isForward || isContact)) {
             fastDelete(from, m.key);
-            notifyOwner('⚠️ عضو قديم بعت شي مشبوه - حذفته بس ما طردتاش لأنه قديم: ' + senderNum);
+            // ✅ v6.8 - توا يقول السبب + شن بعت
+            let reasonOld = getReasonLabel(text, m, isForward, isContact);
+            let previewOld = getMsgPreview(m, text);
+            let gnameOld = await getGroupName(from);
+            notifyOwner('⚠️ عضو قديم بعت شي مشبوه - حذفته بس ما طردتاش لأنه قديم\nالرقم: ' + senderNum + '\nالقروب: ' + gnameOld + '\nالسبب: ' + reasonOld + '\nشن بعت: ' + previewOld);
           }
           continue;
         }
@@ -831,7 +855,7 @@ async function startBot() {
           if (canActOnUser('castle-'+senderNum)) {
             tripleStrike(from, m, sender);
             if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-            notifyOwner('🏰 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: القلعة مفعلة - مش في البيضاء');
+            notifyOwner('🏰 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: القلعة مفعلة - مش في البيضاء\nشن بعت: ' + getMsgPreview(m, text));
           }
           continue;
         }
@@ -839,6 +863,7 @@ async function startBot() {
           if (canActOnUser('raid-'+senderNum)) {
             tripleStrike(from, m, sender);
             if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
+            notifyOwner('🏰 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: وضع هجوم منسق\nشن بعت: ' + getMsgPreview(m, text));
           }
           continue;
         }
@@ -849,7 +874,7 @@ async function startBot() {
             if (canActOnUser('nonumber-'+senderNum)) {
               tripleStrike(from, m, sender);
               if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-              notifyOwner('☠️ اعدام جديد ' + senderNum + ' في قروب ' + from + '\nالسبب: جديد خش وبعت من غير رقم');
+              notifyOwner('☠️ اعدام جديد ' + senderNum + ' في قروب ' + from + '\nالسبب: جديد خش وبعت من غير رقم\nشن بعت: ' + getMsgPreview(m, text));
             }
             continue;
           }
@@ -865,7 +890,7 @@ async function startBot() {
               if (canActOnUser('botdetect-'+senderNum)) {
                 tripleStrike(from, m, sender);
                 if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-                notifyOwner('🤖 كشفت بوت في قروب ' + from + '\nالرقم: ' + senderNum + '\nالسبب: ' + reason + '\nالنقاط: ' + total + '/3');
+                notifyOwner('🤖 كشفت بوت في قروب ' + from + '\nالرقم: ' + senderNum + '\nالسبب: ' + reason + '\nالنقاط: ' + total + '/3\nشن بعت: ' + getMsgPreview(m, text));
                 botScore[senderNum] = [];
               }
               continue;
@@ -875,7 +900,7 @@ async function startBot() {
         if (isBlackSender) {
           if (!canActOnUser('black-'+senderNum)) continue;
           tripleStrike(from, m, sender);
-          notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: في البلاك');
+          notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: في البلاك\nشن بعت: ' + getMsgPreview(m, text));
           continue;
         }
         if (isContact) {
@@ -887,21 +912,21 @@ async function startBot() {
             fastDelete(from, m.key);
             fastKick(from, sender);
             if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-            notifyOwner('🏰🏰 القلعة تفعلت بروحها!\nالسبب: ' + contactTimes.length + ' جهات اتصال في دقيقة - هجوم احزاب');
+            notifyOwner('🏰🏰 القلعة تفعلت بروحها!\nالسبب: ' + contactTimes.length + ' جهات اتصال في دقيقة - هجوم احزاب\nشن بعت: ' + getMsgPreview(m, text));
             contactTimes = [];
             continue;
           }
           if (!canActOnUser('contact-'+senderNum)) continue;
           tripleStrike(from, m, sender);
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-          notifyOwner('🧹 جهة اتصال من ' + senderNum + ' في قروب ' + from + ' - حذفتها وسكرت وطردته');
+          notifyOwner('🧹 جهة اتصال من ' + senderNum + ' في قروب ' + from + ' - حذفتها وسكرت وطردته\nشن بعت: ' + getMsgPreview(m, text));
           continue;
         }
         if (BAN_WORDS.some((w) => lower.indexOf(w) !== -1)) {
           if (!canActOnUser('banword-'+senderNum)) continue;
           tripleStrike(from, m, sender);
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-          notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: كلمة تبنيد');
+          notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: كلمة تبنيد\nشن بعت: ' + getMsgPreview(m, text));
           continue;
         }
         if (isForward && !isSticker) {
@@ -910,7 +935,7 @@ async function startBot() {
           if (!forwardedLocked[from]) {
             forwardedLocked[from] = true;
             sock.groupRevokeInvite(from).catch(()=>{});
-            notifyOwner('🚨 فوروارد من ' + senderNum + ' في قروب ' + from + ' - سكرت والغيت الرابط');
+            notifyOwner('🚨 فوروارد من ' + senderNum + ' في قروب ' + from + ' - سكرت والغيت الرابط\nشن بعت: ' + getMsgPreview(m, text));
             setTimeout(()=>{ forwardedLocked[from] = false; }, 3*60*1000);
           }
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
@@ -920,19 +945,19 @@ async function startBot() {
           if (!canActOnUser('link-'+senderNum)) continue;
           if (lockLinks) {
             tripleStrike(from, m, sender);
-            notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: الروابط مقفولة');
+            notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: الروابط مقفولة\nشن بعت: ' + getMsgPreview(m, text));
             continue;
           }
           fastDelete(from, m.key);
           linkCount[senderNum] = (linkCount[senderNum] || 0) + 1;
           if (linkCount[senderNum] >= 2) {
             fastKick(from, sender);
-            notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: رابط مكرر');
+            notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: رابط مكرر\nشن بعت: ' + getMsgPreview(m, text));
             linkCount[senderNum] = 0;
           } else {
             fastLock(from);
             setTimeout(()=>{ if(!CASTLE_MODE) fastUnlock(from); }, 60000);
-            notifyOwner('🔒 سكرت القروب ' + from + ' 1 دقيقة\nالسبب: ' + senderNum + ' بعت رابط');
+            notifyOwner('🔒 سكرت القروب ' + from + ' 1 دقيقة\nالسبب: ' + senderNum + ' بعت رابط\nشن بعت: ' + getMsgPreview(m, text));
           }
           continue;
         }
@@ -945,7 +970,7 @@ async function startBot() {
             if (!canActOnUser('spam-'+senderNum)) { stickerCount[senderNum] = []; continue; }
             tripleStrike(from, m, sender);
             if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-            notifyOwner('🚨 سبام من ' + senderNum + ' في قروب ' + from + ' - بعت 5 ملصقات ورا بعض');
+            notifyOwner('🚨 سبام من ' + senderNum + ' في قروب ' + from + ' - بعت 5 ملصقات ورا بعض\nشن بعت: ' + getMsgPreview(m, text));
             stickerCount[senderNum] = [];
             continue;
           }
@@ -955,7 +980,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v6.7 Mass Ban + Report Always - Silent - Control Only'));
+app.get('/', (req, res) => res.send('Bot Running - v6.8 Reason + Mass Ban - Silent - Control Only'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
