@@ -274,11 +274,8 @@ async function sendSessionReport(jid, participant, isClean) {
     let d = new Date();
     let time = d.toLocaleTimeString('en-GB') + ',' + d.toLocaleDateString('en-GB');
     let groupName = await getGroupName(jid);
-    let num = getNum(participant);
-    let dedupKey = jid + '_' + num;
-    if (reportedMembers.has(dedupKey)) return;
-    reportedMembers.add(dedupKey);
-    setTimeout(()=>{ reportedMembers.delete(dedupKey); }, 60*60*1000);
+    let num = getNum(typeof participant === 'string' ? participant : (participant.id || participant));
+    // ✅ v6.7 - القسيمة تنبعت ديما، بدون منع تكرار
     let report = '';
     report += '•───⊙ ( 🪶 ) ⊙───•\n\n';
     report += '#. | اسم الجروب ~ 『 ' + groupName + ' 』\n';
@@ -292,7 +289,8 @@ async function sendSessionReport(jid, participant, isClean) {
     }
     report += '•───⊙ ( 🪶 ) ⊙───•\n🕒 ' + time;
     await sock.sendMessage(CONTROL_GROUP, { text: report });
-  } catch(e) {}
+    console.log('REPORT SENT for', num, 'in', jid);
+  } catch(e) { console.log('REPORT ERROR:', e.message); }
 }
 async function enableCastle(reason){
   if (CASTLE_MODE) return;
@@ -377,7 +375,16 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v6.5 - طرد LID شغال + فحص الكل + ملصقات حرة');
+      notifyOwner('✅ البوت متصل - ⚡ v6.7 - القسيمة ديما + حظر جماعي + طرد LID');
+      (async () => {
+        try {
+          const allGroups = await sock.groupFetchAllParticipating();
+          for (let jid in allGroups) {
+            knownMembers[jid] = new Set(allGroups[jid].participants.map(p => getNum(p.id)));
+          }
+          console.log('Known members loaded:', Object.keys(knownMembers).length, 'groups');
+        } catch(e) {}
+      })();
       setTimeout(() => { kickBlacklistedFromAllGroups(); }, 8000);
       setInterval(() => { kickBlacklistedFromAllGroups(); }, 5*60*1000);
       setInterval(async () => {
@@ -578,7 +585,12 @@ async function startBot() {
         }
         if (isOwnerSender) {
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
-          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.5 - طرد LID شغال + فحص الكل - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF')); continue; }
+          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.7 - القسيمة ديما + حظر جماعي - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF')); continue; }
+          if (lower === '.قسيمة' || lower === '.قسيمه' || lower === '.تجربة قسيمة') {
+            await sendSessionReport(from, '999999999@test', false);
+            await reply(from, '✅ بعت قسيمة تجريبية، شوف قروب التحكم');
+            continue;
+          }
           if (lower === '.استقبال' || lower === '.قبول' || lower === '.استقبال شغال') {
             ACCEPT_MODE = true;
             clearTimeout(acceptTimer);
@@ -698,13 +710,13 @@ async function startBot() {
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v6.5 - طرد LID شغال + فحص الكل\n';
+            menu += '│ ⚡ السرعة: v6.7 - القسيمة ديما + حظر جماعي\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - بدون ملصقات\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
-            menu += '• .ايدي\n• .تشخيص\n• .استقبال / .تم القبول\n• .فحص - الجدد بس\n• .فحص الكل - حتى القدم من غير رقم\n• رد + .ابيض / .حظر / .طرد / .فك حظر\n• تاق @ + .ابيض / .حظر\n• ارقام + .ابيض / .حظر\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping';
+            menu += '• .ايدي\n• .تشخيص\n• .قسيمة - تجربة القسيمة\n• .استقبال / .تم القبول\n• .فحص - الجدد بس\n• .فحص الكل - حتى القدم من غير رقم\n• رد + .ابيض / .حظر / .طرد / .فك حظر\n• .حظر جماعي - الصق قايمة ارقام + .حظر\n• .حظر الكل - حظر كل اللي في القايمة\n• تاق @ + .ابيض / .حظر\n• ارقام + .ابيض / .حظر\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping';
             await reply(from, menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
@@ -773,18 +785,21 @@ async function startBot() {
             await reply(from, '✅ نحيت ' + nums.length + ' رقم من البيضاء');
             continue;
           }
-          if (lower.indexOf('.حظر') !== -1 || lower.indexOf('.اضف بلاك') !== -1) {
+          if (lower.indexOf('.حظر الكل') !== -1 || lower.indexOf('.حظر جماعي') !== -1 || lower.indexOf('.حظر') !== -1 || lower.indexOf('.اضف بلاك') !== -1) {
             let nums = getTargets(text, ctx, quotedParticipant);
+            // ✅ v6.7 - الحظر الجماعي راجع: بدون حد، حتى 100+ رقم
             let inWhite = nums.filter((n) => isWhite(n));
             let toBan = nums.filter((n) => !isWhite(n));
-            if (inWhite.length) { await reply(from, '⛔ تعذر، لأنه في القائمة البيضاء'); continue; }
+            if (inWhite.length && toBan.length === 0) { await reply(from, '⛔ تعذر، لأنه في القائمة البيضاء'); continue; }
             if (toBan.length) {
               for (let n of toBan) { if (blackList.indexOf(n) === -1) blackList.push(n); }
               saveLists();
-              await reply(from, '🚫 حظرت ' + toBan.length + ' رقم');
+              await reply(from, '🚫 حظرت ' + toBan.length + ' رقم' + (inWhite.length ? '\n⚠️ تخطيت ' + inWhite.length + ' من البيضاء' : ''));
               let k = await kickBlacklistedFromAllGroups();
               if (k > 0) await reply(from, '✅ طردت ' + k + ' واحد');
-            } else { await reply(from, '⚠️ رد على رسالته ولا تاقيه ولا ابعث رقمه + .حظر'); }
+              // لو حظر جماعي كبير، نبهك
+              if (toBan.length >= 10) await notifyOwner('🚨 حظر جماعي: ' + toBan.length + ' رقم\nفي قروب ' + from);
+            } else { await reply(from, '⚠️ رد على رسالته ولا تاقيه ولا ابعث رقمه + .حظر\nأو الصق قايمة أرقام واكتب .حظر'); }
             continue;
           }
           if (lower.indexOf('.ابيض') !== -1) {
@@ -940,7 +955,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v6.5 Kick LID + Check All - Silent - Control Only'));
+app.get('/', (req, res) => res.send('Bot Running - v6.7 Mass Ban + Report Always - Silent - Control Only'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
