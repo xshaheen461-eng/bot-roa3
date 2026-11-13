@@ -20,7 +20,6 @@ let ACCEPT_MODE = false;
 let acceptTimer = null;
 let knownMembers = {};
 let reportedMembers = new Set();
-// ✅ v7.4 - حفظ دائم: بيضاء + بلاك + LID ما يتمسحوش مع الريستارت
 try { whiteList = JSON.parse(fs.readFileSync('whitelist.json')); } catch(e) { whiteList = []; }
 try { blackList = JSON.parse(fs.readFileSync('blacklist.json')); } catch(e) { blackList = []; }
 try { let s = JSON.parse(fs.readFileSync('settings.json')); lockLinks = s.lockLinks || false; CASTLE_MODE = false; } catch(e) {}
@@ -91,7 +90,6 @@ function linkLidToPhone(lid, phone) {
   if (lid === phone) return;
   if (lidMap[lid] !== phone) { lidMap[lid] = phone; try { fs.writeFileSync('lidmap.json', JSON.stringify(lidMap)); } catch(e) {} }
 }
-// ✅ v7.4 - حل الرقم الحقيقي من LID قبل أي حكم
 function resolvePhone(lid, pn) {
   let lidN = getNum(lid); let pnN = pn ? getNum(pn) : '';
   if (pnN && pnN !== lidN) return pnN;
@@ -114,7 +112,6 @@ let maliciousCache = new Set();
 let joinTimeMap = {};
 let oldMembersCache = new Set();
 let STICKER_SPAM_ENABLED = false;
-function isOldMember(num) { return false; }
 function canActOnUser(key) {
   let now = Date.now();
   if (lastActionPerUser[key] && now - lastActionPerUser[key] < 3000) return false;
@@ -224,7 +221,6 @@ async function getGroupName(jid) {
   if (sock) { sock.groupMetadata(jid).then(meta => { groupNameCache[jid] = meta.subject || jid; }).catch(()=>{}); }
   return jid;
 }
-async function rotateGroupNameOnKick(jid) { return; }
 async function notifyOwner(text) {
   if (!sock) return;
   try {
@@ -238,7 +234,6 @@ async function notifyOwner(text) {
 async function reply(jid, text) { try { await sock.sendMessage(jid, { text }); } catch(e) {} }
 async function replyControl(text) { try { await sock.sendMessage(CONTROL_GROUP, { text }); } catch(e) {} }
 function hideOwnerCommand(from, m) { if (from && from !== CONTROL_GROUP) fastDelete(from, m.key); }
-async function kickUser(jid, user) { try { await sock.groupParticipantsUpdate(jid, [user], 'remove'); return true; } catch(e) { return false; } }
 async function kickAndRename(jid, user, reason) { let ok = await safeKick(jid, user); return ok; }
 async function deleteMsg(jid, key) { return await safeDelete(jid, key); }
 async function sendSessionReport(jid, participant, isClean) {
@@ -318,7 +313,8 @@ const hasLink = (t) => {
   let clean = t.toLowerCase().replace(/\s+/g,'').replace(/[:;]/g,':');
   return /(https?:\/\/|www\.|t\.me\/|telegram\.me\/|wa\.me\/|whatsapp\.com\/|chat\.whatsapp\.com|discord\.gg\/|instagram\.com\/|facebook\.com\/|youtube\.com\/|tiktok\.com\/|vt\.tiktok\.com|finder\.me|\.com|\.net|\.org|\.ly|\.io)/.test(clean);
 };
-const BAN_WORDS = ['.ban', 'تبنيد', 'تخريب', 'هكر'];
+// ✅ v7.5 - معاش نطرد على كلمة عادية، الطرد بس لو حاول يستعمل أمر بنقطة
+const BAN_WORDS = [];
 const DANGEROUS_COMMANDS = ['.ban', 'ban(', 'add3', '.add3', '.تشخيص', '.ادوات', '.ايدي', '.قائمة', '.بيضاء', '.بلاك'];
 let contactLockTimers = {};
 function lockGroupForContact(jid) {
@@ -335,7 +331,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v7.4 - عنده رقم يقعد / جديد من غير رقم ينطرد - بيضاء وبلاك محفوظين');
+      notifyOwner('✅ البوت متصل - ⚡ v7.5 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -365,7 +361,6 @@ async function startBot() {
                 if (p.phoneNumber) joinTimeMap[getNum(p.phoneNumber)] = Date.now();
                 let hasPhone = !!p.phoneNumber;
                 sendSessionReport(jid, p, hasPhone);
-                // ✅ v7.4 - جديد من غير رقم ينطرد، عنده رقم يقعد
                 if (!ACCEPT_MODE && !hasPhone && !isWhite(n) && !isOwner(n)) {
                   if (p.admin) continue;
                   fastKick(jid, p.id);
@@ -483,7 +478,6 @@ async function startBot() {
         const senderPn = m.key.participantPn || sender;
         const senderLid = getNum(sender);
         if (senderPn && sender && senderPn !== sender) linkLidToPhone(sender, senderPn);
-        // ✅ v7.4 - حل الرقم قبل الحكم
         const senderNum = resolvePhone(sender, senderPn);
         const text = m.message.conversation || (m.message.extendedTextMessage && m.message.extendedTextMessage.text) || (m.message.imageMessage && m.message.imageMessage.caption) || (m.message.videoMessage && m.message.videoMessage.caption) || '';
         const isContact = !!m.message.contactMessage || !!m.message.contactsArrayMessage || !!m.message.contactMessageV2;
@@ -502,7 +496,7 @@ async function startBot() {
         const isBlackSender = isBlack(senderNum) || isBlack(senderLid);
         const lower = text.toLowerCase().trim().replace(/_/g,' ');
         if (isOwnerSender && lower === '.ping') {
-          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v7.4 - عنده رقم يقعد / جديد من غير رقم ينطرد - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') });
+          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v7.5 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') });
           continue;
         }
         if (isGroup && from !== CONTROL_GROUP && isContact && !isOwnerSender && !isWhiteSender) {
@@ -528,10 +522,11 @@ async function startBot() {
           if (isMaliciousLink(text, m)) { handleMalicious(from, m, sender, senderNum, 'رابط ملغم / تفجير'); continue; }
           if (Date.now() < warModeUntil && isBlackSender) { fastDelete(from, m.key); continue; }
         }
-        const isDangerous = DANGEROUS_COMMANDS.some(cmd => lower.includes(cmd));
+        // ✅ v7.5 - خطر بس لو بدا بنقطة، كلمة عادية ما تطردش
+        const isDangerous = lower.trim().startsWith('.') && DANGEROUS_COMMANDS.some(cmd => lower.includes(cmd));
         if (isDangerous && !isOwnerSender) {
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-          notifyOwner('🛡️ محاولة استغلال ثغرة .ban من ' + senderNum + '\nشن بعت: ' + getMsgPreview(m, text));
+          notifyOwner('🛡️ محاولة استغلال ثغرة من ' + senderNum + '\nشن بعت: ' + getMsgPreview(m, text));
           if (isGroup) { tripleStrike(from, m, sender); }
           continue;
         }
@@ -642,7 +637,7 @@ async function startBot() {
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v7.4 - عنده رقم يقعد / جديد من غير رقم ينطرد\n';
+            menu += '│ ⚡ السرعة: v7.5 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - النص محجوب\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
@@ -752,7 +747,7 @@ async function startBot() {
           }
           continue;
         }
-        // ✅ v7.4 - جديد من غير رقم ينطرد، عنده رقم يقعد - تأكد من القايمة قبل
+        // ✅ v7.5 - جديد من غير رقم ينطرد، عنده رقم يقعد - تأكد من القايمة قبل
         if (KICK_NO_NUMBER && isGroup && !isWhiteSender && !isOwnerSender && !isAdminSender) {
           let isNewJoin = (joinTimeMap[senderNum] && (Date.now() - joinTimeMap[senderNum] < 5*60*1000)) || (joinTimeMap[senderLid] && (Date.now() - joinTimeMap[senderLid] < 5*60*1000));
           if (isNewJoin && !isSticker) {
@@ -763,9 +758,8 @@ async function startBot() {
               if (p && p.phoneNumber) { hasRealPhone = true; linkLidToPhone(sender, p.phoneNumber); }
             } catch(e) {}
             if (hasRealPhone) {
-              // عنده رقم حقيقي = يقعد، ما نطرداش
+              // عنده رقم حقيقي = يقعد
             } else {
-              // جديد فعلا من غير رقم = ينطرد
               if (canActOnUser('nonumber-'+senderNum)) {
                 tripleStrike(from, m, sender);
                 if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
@@ -799,13 +793,7 @@ async function startBot() {
           notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: في البلاك\nشن بعت: ' + getMsgPreview(m, text));
           continue;
         }
-        if (BAN_WORDS.some((w) => lower.indexOf(w) !== -1)) {
-          if (!canActOnUser('banword-'+senderNum)) continue;
-          tripleStrike(from, m, sender);
-          if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-          notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: كلمة تبنيد\nشن بعت: ' + getMsgPreview(m, text));
-          continue;
-        }
+        // ✅ v7.5 - حذفنا طرد كلمة تبنيد / هكر / تخريب العادية، معاش فيه بلوك BAN_WORDS هنا
         if (isForward && !isSticker) {
           if (!canActOnUser('fwd-'+senderNum)) continue;
           tripleStrike(from, m, sender);
@@ -856,7 +844,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v7.4 - Control Only - Silent'));
+app.get('/', (req, res) => res.send('Bot Running - v7.5 - Control Only - Silent'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
