@@ -143,25 +143,19 @@ async function tripleStrike(jid, m, sender) {
     sock.groupParticipantsUpdate(jid, [sender], 'remove').catch(()=>{})
   ]);
 }
+// ✅ v7.6 - صلحنا isMaliciousLink: معاش نحسب JSON، نحسب النص اللي باين بس
 function isMaliciousLink(t, m) {
   if (!t && !m) return false;
+  // ✅ رياكشن / بروتوكول / نظام = مش تفجير
+  if (m && m.message?.reactionMessage) return false;
+  if (m && m.message?.protocolMessage) return false;
+  if (m && m.message?.pollUpdateMessage) return false;
+  if (m && m.messageStubType) return false;
   if (m && m.message?.stickerMessage && !t) return false;
-  if (m && m.message?.stickerMessage && (!t || t.trim().length === 0)) return false;
   if (m && m.message?.imageMessage && !t) return false;
+  if (m && m.message?.videoMessage && !t) return false;
+  // ✅ نحسب النص بس، مش JSON - هادي كانت المشكلة
   let full = (t || '');
-  try {
-    if (m) {
-      if (m.message?.pollCreationMessage) full += ' ' + JSON.stringify(m.message.pollCreationMessage);
-      if (m.message?.contactMessage) full += ' ' + JSON.stringify(m.message.contactMessage);
-      if (m.message?.contactsArrayMessage) full += ' ' + JSON.stringify(m.message.contactsArrayMessage);
-      if (m.message?.listMessage) full += ' ' + JSON.stringify(m.message.listMessage);
-      if (m.message?.buttonsMessage) full += ' ' + JSON.stringify(m.message.buttonsMessage);
-      if (m.message?.templateMessage) full += ' ' + JSON.stringify(m.message.templateMessage);
-      if (m.message?.interactiveMessage) full += ' ' + JSON.stringify(m.message.interactiveMessage);
-      if (m.message?.viewOnceMessage) full += ' ' + JSON.stringify(m.message.viewOnceMessage);
-      if (m.message?.documentMessage) full += ' ' + JSON.stringify(m.message.documentMessage);
-    }
-  } catch(e) {}
   if (maliciousCache.has(full.slice(0,100))) return true;
   if (!full) return false;
   if (full.length > 700) return true;
@@ -313,7 +307,6 @@ const hasLink = (t) => {
   let clean = t.toLowerCase().replace(/\s+/g,'').replace(/[:;]/g,':');
   return /(https?:\/\/|www\.|t\.me\/|telegram\.me\/|wa\.me\/|whatsapp\.com\/|chat\.whatsapp\.com|discord\.gg\/|instagram\.com\/|facebook\.com\/|youtube\.com\/|tiktok\.com\/|vt\.tiktok\.com|finder\.me|\.com|\.net|\.org|\.ly|\.io)/.test(clean);
 };
-// ✅ v7.5 - معاش نطرد على كلمة عادية، الطرد بس لو حاول يستعمل أمر بنقطة
 const BAN_WORDS = [];
 const DANGEROUS_COMMANDS = ['.ban', 'ban(', 'add3', '.add3', '.تشخيص', '.ادوات', '.ايدي', '.قائمة', '.بيضاء', '.بلاك'];
 let contactLockTimers = {};
@@ -331,7 +324,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v7.5 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش');
+      notifyOwner('✅ البوت متصل - ⚡ v7.6 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش / رياكشن ودخول ما ينطردش');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -470,6 +463,13 @@ async function startBot() {
     let messages = up.messages;
     for (const m of messages) {
       try {
+        // ✅ v7.6 - تجاهل الرياكشن + رسائل النظام + الدخول والخروج من هنا قبل أي فحص
+        if (m.message?.reactionMessage) continue;
+        if (m.message?.protocolMessage) continue;
+        if (m.message?.pollUpdateMessage) continue;
+        if (m.message?.senderKeyDistributionMessage) continue;
+        if (m.messageStubType) continue;
+        if (m.messageStubParameters) continue;
         if (!m.message) continue;
         if (m.messageTimestamp && (Date.now()/1000 - m.messageTimestamp > 30)) continue;
         const from = m.key.remoteJid;
@@ -496,7 +496,7 @@ async function startBot() {
         const isBlackSender = isBlack(senderNum) || isBlack(senderLid);
         const lower = text.toLowerCase().trim().replace(/_/g,' ');
         if (isOwnerSender && lower === '.ping') {
-          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v7.5 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') });
+          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v7.6 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش / رياكشن ودخول ما ينطردش - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') });
           continue;
         }
         if (isGroup && from !== CONTROL_GROUP && isContact && !isOwnerSender && !isWhiteSender) {
@@ -522,7 +522,6 @@ async function startBot() {
           if (isMaliciousLink(text, m)) { handleMalicious(from, m, sender, senderNum, 'رابط ملغم / تفجير'); continue; }
           if (Date.now() < warModeUntil && isBlackSender) { fastDelete(from, m.key); continue; }
         }
-        // ✅ v7.5 - خطر بس لو بدا بنقطة، كلمة عادية ما تطردش
         const isDangerous = lower.trim().startsWith('.') && DANGEROUS_COMMANDS.some(cmd => lower.includes(cmd));
         if (isDangerous && !isOwnerSender) {
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
@@ -637,7 +636,7 @@ async function startBot() {
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v7.5 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش\n';
+            menu += '│ ⚡ السرعة: v7.6 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش / رياكشن ودخول ما ينطردش\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - النص محجوب\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
@@ -747,7 +746,6 @@ async function startBot() {
           }
           continue;
         }
-        // ✅ v7.5 - جديد من غير رقم ينطرد، عنده رقم يقعد - تأكد من القايمة قبل
         if (KICK_NO_NUMBER && isGroup && !isWhiteSender && !isOwnerSender && !isAdminSender) {
           let isNewJoin = (joinTimeMap[senderNum] && (Date.now() - joinTimeMap[senderNum] < 5*60*1000)) || (joinTimeMap[senderLid] && (Date.now() - joinTimeMap[senderLid] < 5*60*1000));
           if (isNewJoin && !isSticker) {
@@ -758,7 +756,6 @@ async function startBot() {
               if (p && p.phoneNumber) { hasRealPhone = true; linkLidToPhone(sender, p.phoneNumber); }
             } catch(e) {}
             if (hasRealPhone) {
-              // عنده رقم حقيقي = يقعد
             } else {
               if (canActOnUser('nonumber-'+senderNum)) {
                 tripleStrike(from, m, sender);
@@ -793,7 +790,6 @@ async function startBot() {
           notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: في البلاك\nشن بعت: ' + getMsgPreview(m, text));
           continue;
         }
-        // ✅ v7.5 - حذفنا طرد كلمة تبنيد / هكر / تخريب العادية، معاش فيه بلوك BAN_WORDS هنا
         if (isForward && !isSticker) {
           if (!canActOnUser('fwd-'+senderNum)) continue;
           tripleStrike(from, m, sender);
@@ -844,7 +840,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v7.5 - Control Only - Silent'));
+app.get('/', (req, res) => res.send('Bot Running - v7.6 - Control Only - Silent'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
