@@ -104,12 +104,8 @@ let maliciousCache = new Set();
 let joinTimeMap = {};
 let oldMembersCache = new Set();
 let STICKER_SPAM_ENABLED = false;
-function isOldMember(num) {
-  if (oldMembersCache.has(num)) return true;
-  if (joinTimeMap[num] && (Date.now() - joinTimeMap[num] > 5*60*1000)) return true;
-  if (!joinTimeMap[num]) return true;
-  return false;
-}
+// ✅ v7.1 - معاش فيه حماية للقديم، الكل زي بعض، الا البيضاء
+function isOldMember(num) { return false; }
 function canActOnUser(key) {
   let now = Date.now();
   if (lastActionPerUser[key] && now - lastActionPerUser[key] < 3000) return false;
@@ -138,10 +134,8 @@ function warLock(jid) {
 async function tripleStrike(jid, m, sender) {
   await Promise.all([
     sock.sendMessage(jid, { delete: m.key }).catch(()=>{}),
-    sock.groupParticipantsUpdate(jid, [sender], 'remove').catch(()=>{}),
-    sock.groupSettingUpdate(jid, 'announcement').catch(()=>{})
+    sock.groupParticipantsUpdate(jid, [sender], 'remove').catch(()=>{})
   ]);
-  setTimeout(() => { if(!CASTLE_MODE) fastUnlock(jid); }, 30000);
 }
 function isMaliciousLink(t, m) {
   if (!t && !m) return false;
@@ -179,12 +173,11 @@ function isMaliciousLink(t, m) {
   if (low.includes('wa.me/') && low.includes('%0a')) return true;
   return false;
 }
-// ✅ v6.8 - دالة جديدة: تجيب السبب + شن بعت، باش كل رسالة تقول علاش
 function getMsgPreview(m, text) {
+  if (m?.message?.contactMessage || m?.message?.contactsArrayMessage) return '[جهة اتصال - محجوبة للحماية]';
+  if (isMaliciousLink(text, m)) return '[نص ملغم - محجوب للحماية]';
   let t = (text || m?.message?.conversation || m?.message?.extendedTextMessage?.text || '').trim();
   if (t) return t.slice(0, 200);
-  if (m?.message?.contactMessage) return '[جهة اتصال: ' + (m.message.contactMessage.displayName || m.message.contactMessage.vcard?.slice(0,80) || '') + ']';
-  if (m?.message?.contactsArrayMessage) return '[عدة جهات اتصال]';
   if (m?.message?.imageMessage) return '[صورة] ' + (m.message.imageMessage.caption || '');
   if (m?.message?.videoMessage) return '[فيديو] ' + (m.message.videoMessage.caption || '');
   if (m?.message?.documentMessage) return '[ملف: ' + (m.message.documentMessage.fileName || '') + ']';
@@ -200,20 +193,15 @@ function getReasonLabel(text, m, isForward, isContact) {
   if (text && text.length > 700) return 'رسالة طويلة جدا (تفجير)';
   return 'شي مشبوه';
 }
+// ✅ v7.1 - قديم ولا جديد، الكل ينطرد، الا البيضاء
 async function handleMalicious(jid, m, sender, senderNum, reason) {
-  let preview = getMsgPreview(m, '');
+  let safeLen = (m?.message?.conversation || m?.message?.extendedTextMessage?.text || '').length;
   let gname = await getGroupName(jid);
-  if (isOldMember(senderNum)) {
-    fastDelete(jid, m.key);
-    notifyOwner('⚠️ عضو قديم بعت رابط ملغّم - حذفته بس ما طردتاش لأنه قديم\nالرقم: ' + senderNum + '\nالقروب: ' + gname + '\nالسبب: ' + reason + '\nشن بعت: ' + preview);
-    return;
-  }
-  tripleStrike(jid, m, sender);
+  fastDelete(jid, m.key);
+  fastKick(jid, sender);
   if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
   maliciousCache.add((m.message?.conversation || '').slice(0,100));
-  warModeUntil = Date.now() + 30000;
-  rotateGroupNameOnKick(jid).catch(()=>{});
-  notifyOwner('💣 رابط ملغم من ' + senderNum + ' في قروب ' + gname + '\nالسبب: ' + reason + '\nشن بعت: ' + preview + '\n⚡ حذف + طرد + قفل في نفس اللحظة');
+  notifyOwner('💣 رابط ملغم من ' + senderNum + ' في قروب ' + gname + '\nالسبب: ' + reason + '\nطول الرسالة: ' + safeLen + ' حرف - [النص محجوب]\n⚡ حذف + طرد فقط');
 }
 let linkCount = {};
 let stickerCount = {};
@@ -235,31 +223,12 @@ function addBotScore(num, points) {
 async function getGroupName(jid) {
   if (!jid) return jid;
   if (groupNameCache[jid]) return groupNameCache[jid];
-  try {
-    const meta = await sock.groupMetadata(jid);
-    groupNameCache[jid] = meta.subject || jid;
-    return groupNameCache[jid];
-  } catch(e) { return jid; }
+  if (sock) {
+    sock.groupMetadata(jid).then(meta => { groupNameCache[jid] = meta.subject || jid; }).catch(()=>{});
+  }
+  return jid;
 }
-async function rotateGroupNameOnKick(jid) {
-  try {
-    if (!jid || jid === CONTROL_GROUP) return;
-    let now = Date.now();
-    if (lastRename[jid] && now - lastRename[jid] < 5*60*1000) return;
-    lastRename[jid] = now;
-    const meta = await sock.groupMetadata(jid);
-    let current = meta.subject || '';
-    if (!groupBaseName[jid]) {
-      groupBaseName[jid] = current.split(' | ')[0].replace(/🛡️/g,'').replace(/🔒/g,'').replace(/🏰/g,'').trim();
-    }
-    let base = groupBaseName[jid];
-    let nowD = new Date();
-    let suffix = nowD.getHours() + ':' + nowD.getMinutes() + ':' + nowD.getSeconds();
-    let newName = base + ' | 🛡️ ' + suffix;
-    await sock.groupUpdateSubject(jid, newName);
-    groupNameCache[jid] = newName;
-  } catch(e) {}
-}
+async function rotateGroupNameOnKick(jid) { return; }
 async function notifyOwner(text) {
   if (!sock) return;
   try {
@@ -267,28 +236,17 @@ async function notifyOwner(text) {
     let now = Date.now();
     if (lastKickNotify[key] && now - lastKickNotify[key] < 60*1000) return;
     lastKickNotify[key] = now;
-    let finalText = text;
-    let matches = text.match(/[0-9]+@g\.us/g) || [];
-    for (let jid of matches) {
-      let name = await getGroupName(jid);
-      finalText = finalText.split(jid).join('📌 ' + name);
-    }
-    await sock.sendMessage(CONTROL_GROUP, { text: finalText });
+    sock.sendMessage(CONTROL_GROUP, { text }).catch(()=>{});
   } catch(e) {}
 }
 async function reply(jid, text) {
-  try {
-    if (jid === CONTROL_GROUP) { await sock.sendMessage(jid, { text }); return; }
-    let gname = await getGroupName(jid);
-    await sock.sendMessage(CONTROL_GROUP, { text: '📩 رد من قروب: ' + gname + '\n\n' + text });
-  } catch(e) {}
+  try { await sock.sendMessage(jid, { text }); } catch(e) {}
 }
 async function kickUser(jid, user) {
   try { await sock.groupParticipantsUpdate(jid, [user], 'remove'); return true; } catch(e) { return false; }
 }
 async function kickAndRename(jid, user, reason) {
   let ok = await safeKick(jid, user);
-  if (ok) rotateGroupNameOnKick(jid).catch(()=>{});
   return ok;
 }
 async function deleteMsg(jid, key) { return await safeDelete(jid, key); }
@@ -322,7 +280,6 @@ async function enableCastle(reason){
     for(let jid in groups){
       if(jid === CONTROL_GROUP) continue;
       try{ await sock.groupSettingUpdate(jid, 'announcement'); }catch(e){}
-      try{ await sock.groupRevokeInvite(jid); }catch(e){}
     }
   }catch(e){}
   await notifyOwner('🏰🏰 تم تفعيل القلعة تلقائيا\nالسبب: ' + (reason || 'بأمر المالك') + '\nالوضع: بيضاء بس - الباقي طرد طول\nللإطفاء اكتب: .فتح القلعة');
@@ -358,7 +315,6 @@ async function kickBlacklistedFromAllGroups() {
           if (p.phoneNumber) linkLidToPhone(p.id, p.phoneNumber);
           if (p.admin) continue;
           if (isWhiteParticipant(p)) continue;
-          if (isOldMember(n)) continue;
           if (CASTLE_MODE) {
             let ok = await kickAndRename(jid, p.id, 'قلعة');
             if (ok) {
@@ -388,21 +344,28 @@ const hasLink = (t) => {
 };
 const BAN_WORDS = ['.ban', 'تبنيد', 'تخريب', 'هكر'];
 const DANGEROUS_COMMANDS = ['.ban', 'ban(', 'add3', '.add3', '.تشخيص', '.ادوات', '.ايدي', '.قائمة', '.بيضاء', '.بلاك'];
+let contactLockTimers = {};
+function lockGroupForContact(jid) {
+  fastLock(jid);
+  if (contactLockTimers[jid]) clearTimeout(contactLockTimers[jid]);
+  contactLockTimers[jid] = setTimeout(() => { if(!CASTLE_MODE) fastUnlock(jid); }, 5*60*1000);
+}
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
   const { version } = await fetchLatestBaileysVersion();
-  sock = makeWASocket({ version, auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: false, syncFullHistory: false, keepAliveIntervalMs: 15000, markOnlineOnConnect: false });
+  sock = makeWASocket({ version, auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: false, syncFullHistory: false, keepAliveIntervalMs: 10000, markOnlineOnConnect: false });
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', (u) => {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v6.8 - يقول السبب + حظر جماعي + القسيمة ديما');
+      notifyOwner('✅ البوت متصل - ⚡ v7.1 - قديم ينطرد زي الجديد - الا البيضاء');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
           for (let jid in allGroups) {
             knownMembers[jid] = new Set(allGroups[jid].participants.map(p => getNum(p.id)));
+            groupNameCache[jid] = allGroups[jid].subject || jid;
           }
           console.log('Known members loaded:', Object.keys(knownMembers).length, 'groups');
         } catch(e) {}
@@ -415,6 +378,7 @@ async function startBot() {
           for (let jid in groups) {
             if (jid === CONTROL_GROUP) continue;
             const meta = groups[jid];
+            groupNameCache[jid] = meta.subject || jid;
             if (!knownMembers[jid]) {
               knownMembers[jid] = new Set(meta.participants.map(p => getNum(p.id)));
               continue;
@@ -489,7 +453,6 @@ async function startBot() {
             if (!isOwner(getNum(p)) && !isWhite(getNum(p))) {
               let hasPh = (typeof p === 'object' && p.phoneNumber) ? true : false;
               sendSessionReport(jid, p, hasPh);
-              if (isOldMember(getNum(p))) continue;
               kickAndRename(jid, p, 'هجوم منسق');
               if (blackList.indexOf(getNum(p)) === -1) blackList.push(getNum(p));
             }
@@ -506,7 +469,6 @@ async function startBot() {
           let hasPhone = (typeof p === 'object' && p.phoneNumber) ? true : false;
           if (typeof p === 'string' && p.includes('@lid')) hasPhone = false;
           sendSessionReport(jid, p, hasPhone);
-          if (isOldMember(n)) continue;
           if (CASTLE_MODE && !isWhite(n) && !isOwner(n)) {
             fastLock(jid);
             fastKick(jid, p);
@@ -568,18 +530,41 @@ async function startBot() {
         const isWhiteSender = isWhite(senderNum) || isWhite(senderLid) || (lidMap[senderLid] && isWhite(lidMap[senderLid]));
         const isBlackSender = isBlack(senderNum) || isBlack(senderLid);
         const lower = text.toLowerCase().trim().replace(/_/g,' ');
+        if (isOwnerSender && lower === '.ping') {
+          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v7.1 - قديم ينطرد زي الجديد - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') });
+          continue;
+        }
+        // ✅ v7.1 - جهة اتصال: قديم ولا جديد، ينطرد، الا البيضاء
+        if (isGroup && from !== CONTROL_GROUP && isContact && !isOwnerSender && !isWhiteSender) {
+          lockGroupForContact(from);
+          fastDelete(from, m.key);
+          if (!canActOnUser('contact-fast-'+senderNum)) continue;
+          fastKick(from, sender);
+          if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
+          let nowC = Date.now();
+          contactTimes = contactTimes.filter(t => nowC - t < 60000);
+          contactTimes.push(nowC);
+          if (contactTimes.length >= 2 && !CASTLE_MODE) {
+            enableCastle('هجوم جهات اتصال - ' + contactTimes.length + ' جهات في اقل من دقيقة');
+            notifyOwner('🏰🏰 القلعة تفعلت بروحها!\nالسبب: ' + contactTimes.length + ' جهات اتصال في دقيقة');
+            contactTimes = [];
+          } else {
+            notifyOwner('🧹 جهة اتصال من ' + senderNum + ' في قروب ' + from + '\nالسبب: جهة اتصال 🧹\nتم: حذف + قفل 5 دقايق + طرد + بلاك - حتى لو قديم');
+          }
+          continue;
+        }
         if (isGroup && from !== CONTROL_GROUP && !isOwnerSender && !isWhiteSender) {
           if (isMaliciousLink(text, m)) {
             handleMalicious(from, m, sender, senderNum, 'رابط ملغم / تفجير');
             continue;
           }
-          if (Date.now() < warModeUntil && isBlackSender && !isOldMember(senderNum)) {
+          if (Date.now() < warModeUntil && isBlackSender) {
             fastDelete(from, m.key);
             continue;
           }
         }
         const isDangerous = DANGEROUS_COMMANDS.some(cmd => lower.includes(cmd));
-        if (isDangerous && !isOwnerSender && !isOldMember(senderNum)) {
+        if (isDangerous && !isOwnerSender) {
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
           notifyOwner('🛡️ محاولة استغلال ثغرة .ban من ' + senderNum + '\nشن بعت: ' + getMsgPreview(m, text));
           if (isGroup) {
@@ -605,9 +590,9 @@ async function startBot() {
             } catch(e) {}
           }
         }
+        if (isAdminSender && isContact) continue;
         if (isOwnerSender) {
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
-          if (lower === '.ping') { await reply(from, '✅ Bot online - ⚡ v6.8 - يقول السبب + حظر جماعي - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF')); continue; }
           if (lower === '.قسيمة' || lower === '.قسيمه' || lower === '.تجربة قسيمة') {
             await sendSessionReport(from, '999999999@test', false);
             await reply(from, '✅ بعت قسيمة تجريبية، شوف قروب التحكم');
@@ -675,8 +660,6 @@ async function startBot() {
                 if (isMe(p)) continue;
                 if (isWhiteParticipant(p)) continue;
                 if (isOwner(n)) continue;
-                let isNewAccepted = joinTimeMap[n] && (Date.now() - joinTimeMap[n] < 24*60*60*1000);
-                if (!isNewAccepted && isOldMember(n)) continue;
                 if (!p.phoneNumber) noNumberList.push(n);
                 else if (isBlack(n)) blackListFound.push(n);
               }
@@ -732,8 +715,8 @@ async function startBot() {
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v6.8 - يقول السبب + حظر جماعي\n';
-            menu += '│ 💣 حماية ملغّمة: شغالة - بدون ملصقات\n';
+            menu += '│ ⚡ السرعة: v7.1 - قديم ينطرد زي الجديد\n';
+            menu += '│ 💣 حماية ملغّمة: شغالة - النص محجوب\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
             menu += '╰─── 🍷 ───╯\n\n';
@@ -840,17 +823,7 @@ async function startBot() {
         if (from === CONTROL_GROUP) continue;
         if (isWhiteSender) continue;
         if (isAdminSender) continue;
-        if (isOldMember(senderNum)) {
-          if (!isSticker && !isImage && (isMaliciousLink(text, m) || hasLink(text) || isForward || isContact)) {
-            fastDelete(from, m.key);
-            // ✅ v6.8 - توا يقول السبب + شن بعت
-            let reasonOld = getReasonLabel(text, m, isForward, isContact);
-            let previewOld = getMsgPreview(m, text);
-            let gnameOld = await getGroupName(from);
-            notifyOwner('⚠️ عضو قديم بعت شي مشبوه - حذفته بس ما طردتاش لأنه قديم\nالرقم: ' + senderNum + '\nالقروب: ' + gnameOld + '\nالسبب: ' + reasonOld + '\nشن بعت: ' + previewOld);
-          }
-          continue;
-        }
+        // ✅ v7.1 - معاش فيه بلوك للقديم، القديم يكمل لتحت وينطرد زي الجديد
         if (CASTLE_MODE) {
           if (canActOnUser('castle-'+senderNum)) {
             tripleStrike(from, m, sender);
@@ -903,25 +876,6 @@ async function startBot() {
           notifyOwner('🚨 طردت ' + senderNum + ' من قروب ' + from + '\nالسبب: في البلاك\nشن بعت: ' + getMsgPreview(m, text));
           continue;
         }
-        if (isContact) {
-          let nowC = Date.now();
-          contactTimes = contactTimes.filter(t => nowC - t < 60000);
-          contactTimes.push(nowC);
-          if (contactTimes.length >= 2 && !CASTLE_MODE) {
-            await enableCastle('هجوم جهات اتصال - ' + contactTimes.length + ' جهات في اقل من دقيقة');
-            fastDelete(from, m.key);
-            fastKick(from, sender);
-            if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-            notifyOwner('🏰🏰 القلعة تفعلت بروحها!\nالسبب: ' + contactTimes.length + ' جهات اتصال في دقيقة - هجوم احزاب\nشن بعت: ' + getMsgPreview(m, text));
-            contactTimes = [];
-            continue;
-          }
-          if (!canActOnUser('contact-'+senderNum)) continue;
-          tripleStrike(from, m, sender);
-          if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
-          notifyOwner('🧹 جهة اتصال من ' + senderNum + ' في قروب ' + from + ' - حذفتها وسكرت وطردته\nشن بعت: ' + getMsgPreview(m, text));
-          continue;
-        }
         if (BAN_WORDS.some((w) => lower.indexOf(w) !== -1)) {
           if (!canActOnUser('banword-'+senderNum)) continue;
           tripleStrike(from, m, sender);
@@ -934,8 +888,7 @@ async function startBot() {
           tripleStrike(from, m, sender);
           if (!forwardedLocked[from]) {
             forwardedLocked[from] = true;
-            sock.groupRevokeInvite(from).catch(()=>{});
-            notifyOwner('🚨 فوروارد من ' + senderNum + ' في قروب ' + from + ' - سكرت والغيت الرابط\nشن بعت: ' + getMsgPreview(m, text));
+            notifyOwner('🚨 فوروارد من ' + senderNum + ' في قروب ' + from + ' - سكرت\nشن بعت: ' + getMsgPreview(m, text));
             setTimeout(()=>{ forwardedLocked[from] = false; }, 3*60*1000);
           }
           if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
@@ -980,7 +933,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v6.8 Reason + Mass Ban - Silent - Control Only'));
+app.get('/', (req, res) => res.send('Bot Running - v7.1 Old Kick + AntiBan - Silent - Control Only'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
