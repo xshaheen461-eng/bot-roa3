@@ -10,8 +10,8 @@ const app = express();
 let qrCode = '';
 let sock = null;
 let whiteList = [];
-let blackList = []; // GLOBAL
-let mutedList = []; // v8.4 - قائمة الكتم العام
+let blackList = [];
+let mutedList = [];
 let exemptGroups = [];
 let lockLinks = false;
 let CASTLE_MODE = false;
@@ -22,11 +22,12 @@ let ACCEPT_MODE = false;
 let acceptTimer = null;
 let knownMembers = {};
 let reportedMembers = new Set();
+let ANTI_LINKED = true; // v8.5 - حماية جهاز مرتبط ON
 try { whiteList = JSON.parse(fs.readFileSync('whitelist.json')); } catch(e) { whiteList = []; }
 try { blackList = JSON.parse(fs.readFileSync('blacklist.json')); } catch(e) { blackList = []; }
 try { mutedList = JSON.parse(fs.readFileSync('muted.json')); } catch(e) { mutedList = []; }
 try { exemptGroups = JSON.parse(fs.readFileSync('exempt.json')); } catch(e) { exemptGroups = []; }
-try { let s = JSON.parse(fs.readFileSync('settings.json')); lockLinks = s.lockLinks || false; CASTLE_MODE = false; } catch(e) {}
+try { let s = JSON.parse(fs.readFileSync('settings.json')); lockLinks = s.lockLinks || false; CASTLE_MODE = false; ANTI_LINKED = s.ANTI_LINKED !== false; } catch(e) {}
 let lidMap = {};
 try { lidMap = JSON.parse(fs.readFileSync('lidmap.json')) || {}; } catch(e) { lidMap = {}; }
 const saveLists = () => {
@@ -35,7 +36,7 @@ const saveLists = () => {
     fs.writeFileSync('blacklist.json', JSON.stringify(blackList));
     fs.writeFileSync('muted.json', JSON.stringify(mutedList));
     fs.writeFileSync('exempt.json', JSON.stringify(exemptGroups));
-    fs.writeFileSync('settings.json', JSON.stringify({ lockLinks }));
+    fs.writeFileSync('settings.json', JSON.stringify({ lockLinks, ANTI_LINKED }));
     fs.writeFileSync('lidmap.json', JSON.stringify(lidMap));
   } catch(e) {}
 };
@@ -370,6 +371,14 @@ function lockGroupForContact(jid) {
   if (contactLockTimers[jid]) clearTimeout(contactLockTimers[jid]);
   contactLockTimers[jid] = setTimeout(() => { if(!CASTLE_MODE) fastUnlock(jid); }, 5*60*1000);
 }
+// v8.5 - فحص جهاز مرتبط: 0 = تلفون، غيره = بوت / ويب
+function isLinkedDevice(p) {
+  let pStr = typeof p === 'string' ? p : (p.id || '');
+  if (typeof p === 'object' && p.phoneNumber) return false;
+  if (!pStr.includes(':')) return false;
+  let device = pStr.split(':')[1].split('@')[0];
+  return device && device !== '0';
+}
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
   const { version } = await fetchLatestBaileysVersion();
@@ -379,7 +388,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v8.4 بلاك عام + كتم عام');
+      notifyOwner('✅ البوت متصل - ⚡ v8.5 بلاك + كتم + حماية جهاز مرتبط');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -462,6 +471,22 @@ async function startBot() {
     try {
       const jid0 = u.id;
       if (jid0 && isExempt(jid0)) return;
+      // ===== v8.5 - حماية جهاز مرتبط =====
+      if (ANTI_LINKED && (u.action === 'add' || u.action === 'invite' || u.action === 'join')) {
+        if (u.id !== CONTROL_GROUP) {
+          for (let p of u.participants) {
+            if (!isLinkedDevice(p)) continue;
+            let pStr = typeof p === 'string' ? p : (p.id || '');
+            let n = getNum(pStr);
+            if (isWhite(n) || isOwner(n) || isWhiteParticipant(p)) continue;
+            try { await sock.sendMessage(u.id, { text: `تم طرد @${n} 🤖\n(جهاز مرتبط)` }); } catch(e) {}
+            try { await sock.groupParticipantsUpdate(u.id, [pStr], 'remove'); } catch(e) {}
+            if (blackList.indexOf(n) === -1) { blackList.push(n); saveLists(); }
+            notifyOwner('🤖 طردت بوت جهاز مرتبط: ' + n + ' من قروب ' + u.id + '\nالسبب: دخل بجهاز مرتبط مش تلفون');
+          }
+        }
+      }
+      // ===== نهاية حماية جهاز مرتبط =====
       if (u.action === 'add' || u.action === 'invite' || u.action === 'join') {
         const jid = u.id;
         if (jid === CONTROL_GROUP) return;
@@ -561,7 +586,7 @@ async function startBot() {
         if (isOnlySticker || isOnlyImage) continue;
         if (m.key.fromMe) {
           let t = text.trim();
-          if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0 || t.indexOf('☠️') === 0 || t.indexOf('🏰') === 0 || t.indexOf('🔍') === 0 || t.indexOf('•───') === 0 || t.indexOf('⚡') === 0 || t.indexOf('🔇') === 0 || t.indexOf('🔊') === 0) continue;
+          if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0 || t.indexOf('☠️') === 0 || t.indexOf('🏰') === 0 || t.indexOf('🔍') === 0 || t.indexOf('•───') === 0 || t.indexOf('⚡') === 0 || t.indexOf('🔇') === 0 || t.indexOf('🔊') === 0 || t.indexOf('🤖') === 0) continue;
         }
         const isOwnerSender = isOwner(senderNum) || isOwner(senderLid) || m.key.fromMe;
         const isWhiteSender = isWhite(senderNum) || isWhite(senderLid) || (lidMap[senderLid] && isWhite(lidMap[senderLid]));
@@ -573,7 +598,6 @@ async function startBot() {
           let allowOwnerExemptCmd = isOwnerSender && (lower.includes('.الغاء استثناء') || lower.includes('.الغاء الاستثناء') || lower === '.استثناءات' || lower === '.قائمة استثناء' || lower === '.ping' || lower === '.سرعة' || lower === '.سرعه');
           if (!allowOwnerExemptCmd) continue;
         }
-        // v8.4 - الكتم: لو مكتوم، امسح رسالته طول وما تخليش حد يشوفها
         if (isGroup && from !== CONTROL_GROUP && isMutedSender && !isOwnerSender && !isWhiteSender) {
           fastDelete(from, m.key);
           continue;
@@ -582,11 +606,11 @@ async function startBot() {
           let sentTime = m.messageTimestamp ? m.messageTimestamp * 1000 : Date.now();
           let latency = Date.now() - sentTime;
           let verdict = latency < 400 ? '✅ ممتاز - أسرع من أغلب بوتات المبندين' : latency < 800 ? '🟡 متوسط - قريب من بوتات المبندين' : '🔴 بطيء - السيرفر راقد، غير الهوستينج';
-          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (latency / 1000).toFixed(2) + ' ثانية\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv8.4 بلاك + كتم عام' });
+          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (latency / 1000).toFixed(2) + ' ثانية\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv8.5 بلاك + كتم + جهاز مرتبط' });
           continue;
         }
         if (isOwnerSender && lower === '.ping') {
-          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v8.4 بلاك + كتم عام - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
+          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v8.5 بلاك + كتم + جهاز مرتبط - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + ' - حماية بوت: ' + (ANTI_LINKED ? 'ON 🤖' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
           continue;
         }
         const _ctxEarly = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
@@ -647,21 +671,22 @@ async function startBot() {
         }
         if (isAdminSender && isContact) continue;
         if (isOwnerSender) {
-          let isSensitiveCmd = lower.includes('.حظر') || lower.includes('.ابيض') || lower.includes('.طرد') || lower.includes('.فحص') || lower.includes('.تنظيف') || lower.includes('.قلعة') || lower.includes('.قلعه') || lower.includes('.تشخيص') || lower.includes('.ادوات') || lower.includes('.بيضاء') || lower.includes('.بلاك') || lower.includes('.قائمة') || lower.includes('.حذف') || lower.includes('.استقبال') || lower.includes('.قبول') || lower.includes('.تم القبول') || lower.includes('.سكر الاستقبال') || lower.includes('.قسيمة') || lower.includes('.قفل الروابط') || lower.includes('.فتح الروابط') || lower.includes('.فك حظر') || lower.includes('.الغاء') || lower.includes('.استثناء') || lower.includes('.سرعة') || lower.includes('.سرعه') || lower.includes('.كتم') || lower.includes('.فك كتم');
+          let isSensitiveCmd = lower.includes('.حظر') || lower.includes('.ابيض') || lower.includes('.طرد') || lower.includes('.فحص') || lower.includes('.تنظيف') || lower.includes('.قلعة') || lower.includes('.قلعه') || lower.includes('.تشخيص') || lower.includes('.ادوات') || lower.includes('.بيضاء') || lower.includes('.بلاك') || lower.includes('.قائمة') || lower.includes('.حذف') || lower.includes('.استقبال') || lower.includes('.قبول') || lower.includes('.تم القبول') || lower.includes('.سكر الاستقبال') || lower.includes('.قسيمة') || lower.includes('.قفل الروابط') || lower.includes('.فتح الروابط') || lower.includes('.فك حظر') || lower.includes('.الغاء') || lower.includes('.استثناء') || lower.includes('.سرعة') || lower.includes('.سرعه') || lower.includes('.كتم') || lower.includes('.فك كتم') || lower.includes('حماية بوت') || lower.includes('جهاز مرتبط');
           if (isSensitiveCmd && from !== CONTROL_GROUP) hideOwnerCommand(from, m);
           let r = async (txt) => { if (isSensitiveCmd && from !== CONTROL_GROUP) { await replyControl(txt); } else { await reply(from, txt); } };
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
           if (lower === '.قسيمة' || lower === '.قسيمه' || lower === '.تجربة قسيمة') { await sendSessionReport(from, '999999999@test', false); await r('✅ بعت قسيمة تجريبية، شوف قروب التحكم'); continue; }
-          // ===== v8.4 - أوامر الكتم العام =====
+          // ===== v8.5 - أوامر حماية جهاز مرتبط =====
+          if (lower === '.حماية بوت' || lower === '.حماية جهاز' || lower === '.جهاز مرتبط') { await r('🤖 حماية جهاز مرتبط: ' + (ANTI_LINKED ? 'شغالة ON' : 'طافية OFF') + '\n.حماية بوت تشغيل\n.حماية بوت اطفاء'); continue; }
+          if (lower === '.حماية بوت تشغيل' || lower === '.تشغيل حماية بوت' || lower === '.قفل جهاز مرتبط') { ANTI_LINKED = true; saveLists(); await r('🤖 شغلت حماية جهاز مرتبط - أي بوت يخش حينطرد طول'); continue; }
+          if (lower === '.حماية بوت اطفاء' || lower === '.اطفاء حماية بوت' || lower === '.فتح جهاز مرتبط') { ANTI_LINKED = false; saveLists(); await r('🤖 طفيت حماية جهاز مرتبط - البوتات تقدر تخش توا'); continue; }
           if (lower === '.كتم' || lower === '.كتم.' || lower === '.mute') {
-            // لو ما حددتش حد، ما تكتمش روحك - وريه كيف يستعمل
-            await r('❌ استخدم:\n.كتم @منشن أو بالرد\n.كتم الغاء @منشن لإلغاء الكتم\n.كتم حالة\n.كتم.كتم. تحرير');
-            continue;
+            await r('❌ استخدم:\n.كتم @منشن أو بالرد\n.كتم الغاء @منشن لإلغاء الكتم\n.كتم حالة'); continue;
           }
           if (lower.includes('.كتم') && !lower.includes('الغاء') && !lower.includes('فك') && !lower.includes('حالة') && !lower.includes('قائمة')) {
             let nums = getTargets(text, ctx, quotedParticipant);
             let expanded = await expandTargets(nums, from);
-            if (!expanded.length) { await r('❌ استخدم:\n.كتم @منشن أو بالرد\n.كتم الغاء @منشن لإلغاء الكتم\n.كتم حالة\n.كتم.كتم. تحرير'); continue; }
+            if (!expanded.length) { await r('❌ استخدم:\n.كتم @منشن أو بالرد\n.كتم الغاء @منشن لإلغاء الكتم\n.كتم حالة'); continue; }
             let done = [];
             for (let n of expanded) {
               if (isOwner(n)) { await r('⛔ ما تقدرش تكتم نفسك / المالك'); continue; }
@@ -679,7 +704,7 @@ async function startBot() {
             for (let n of expanded) mutedList = mutedList.filter(x => x !== n);
             saveLists(); await r('🔊 تم الغاء كتم العضو.\n' + expanded.join('\n')); continue;
           }
-          if (lower === '.كتم حالة' || lower === '.كتم قائمة' || lower === '.قائمة كتم' || lower === '.المكتومين' || lower === '.كتم. قائمة') {
+          if (lower === '.كتم حالة' || lower === '.كتم قائمة' || lower === '.قائمة كتم' || lower === '.المكتومين') {
             await r('🔇 قائمة الكتم العام:\n' + (mutedList.length ? mutedList.join('\n') : 'فاضية - مافيش حد مكتوم')); continue;
           }
           if (lower === '.حذف كتم' || lower === '.حذف الكتم') { mutedList = []; saveLists(); await r('✅ مسحت قائمة الكتم كلها'); continue; }
@@ -776,7 +801,7 @@ async function startBot() {
               const groups = await sock.groupFetchAllParticipating();
               let total = Object.keys(groups).length; let adminList = [];
               for (let jid in groups) { const meta = groups[jid]; let me2 = null; for (let p of meta.participants) { if (isMe(p)) me2 = p; } if (me2 && me2.admin) adminList.push(meta.subject || jid); }
-              let msg = '🔍 تشخيص:\nرقمي: ' + OWNER_NUMBER + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\nبيضاء: ' + whiteList.length + '\nبلاك عام: ' + blackList.length + '\nمكتومين: ' + mutedList.length + '\nمستثنى: ' + exemptGroups.length + '\nقلعة: ' + (CASTLE_MODE ? 'ON' : 'OFF');
+              let msg = '🔍 تشخيص:\nرقمي: ' + OWNER_NUMBER + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\nبيضاء: ' + whiteList.length + '\nبلاك عام: ' + blackList.length + '\nمكتومين: ' + mutedList.length + '\nمستثنى: ' + exemptGroups.length + '\nقلعة: ' + (CASTLE_MODE ? 'ON' : 'OFF') + '\nحماية بوت: ' + (ANTI_LINKED ? 'ON' : 'OFF');
               await r(msg);
             } catch(e) { await r('خطأ تشخيص: ' + e.message); }
             continue;
@@ -788,13 +813,14 @@ async function startBot() {
             menu += '│ 🔇 المكتومين: ' + mutedList.length + '\n';
             menu += '│ 🛡️ مستثنى: ' + exemptGroups.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v8.4 بلاك + كتم عام\n';
+            menu += '│ ⚡ السرعة: v8.5 بلاك + كتم + جهاز مرتبط\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - النص محجوب\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
+            menu += '│ 🤖 حماية بوت: ' + (ANTI_LINKED ? 'شغالة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
-            menu += '• .ايدي\n• .تشخيص\n• .قسيمة\n• .سرعة\n• .استقبال / .تم القبول\n• .استثناء / .الغاء استثناء / .استثناءات\n• .فحص / .فحص الكل\n• رد + .ابيض / .حظر / .طرد / .فك حظر / .كتم / .كتم الغاء\n• منشن + .حظر / .طرد / .ابيض / .كتم\n• .حظر جماعي\n• .بيضاء / .بلاك / .قائمة / .قائمة كتم\n• .حذف - رد على رسالة\n• .حذف بلاك / .حذف كتم\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping';
+            menu += '• .ايدي\n• .تشخيص\n• .قسيمة\n• .سرعة\n• .حماية بوت / .حماية بوت تشغيل / .حماية بوت اطفاء\n• .استقبال / .تم القبول\n• .استثناء / .الغاء استثناء / .استثناءات\n• .فحص / .فحص الكل\n• رد + .ابيض / .حظر / .طرد / .فك حظر / .كتم / .كتم الغاء\n• منشن + .حظر / .طرد / .ابيض / .كتم\n• .حظر جماعي\n• .بيضاء / .بلاك / .قائمة / .قائمة كتم\n• .حذف - رد على رسالة\n• .حذف بلاك / .حذف كتم\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping';
             await r(menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
@@ -805,7 +831,7 @@ async function startBot() {
           }
           if (lower === '.بيضاء') { await r('🤍 البيضاء:\n' + (whiteList.length ? whiteList.join('\n') : 'فاضية')); continue; }
           if (lower === '.بلاك') { await r('🚫 البلاك العام - يخدم في كل القروبات:\n' + (blackList.length ? blackList.join('\n') : 'فاضي')); continue; }
-          if (lower === '.قائمة') { await r('🤍 بيضاء: ' + whiteList.length + '\n🚫 بلاك عام: ' + blackList.length + '\n🔇 مكتومين: ' + mutedList.length + '\n🛡️ مستثنى: ' + exemptGroups.length + '\n🏰 قلعة: ' + (CASTLE_MODE ? 'ON' : 'OFF')); continue; }
+          if (lower === '.قائمة') { await r('🤍 بيضاء: ' + whiteList.length + '\n🚫 بلاك عام: ' + blackList.length + '\n🔇 مكتومين: ' + mutedList.length + '\n🛡️ مستثنى: ' + exemptGroups.length + '\n🏰 قلعة: ' + (CASTLE_MODE ? 'ON' : 'OFF') + '\n🤖 حماية بوت: ' + (ANTI_LINKED ? 'ON' : 'OFF')); continue; }
           if (lower === '.فتح' && isGroup) { try { await sock.groupSettingUpdate(from, 'not_announcement'); await reply(from, '✅ فتحت القروب'); } catch(e) {} continue; }
           if ((lower === '.سكر' || lower === '.قفل') && isGroup) { try { await sock.groupSettingUpdate(from, 'announcement'); await reply(from, '🔒 سكرت القروب'); } catch(e) {} continue; }
           if (lower === '.قفل الروابط') { lockLinks = true; saveLists(); await r('🔗 قفلت الروابط'); continue; }
@@ -1006,7 +1032,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v8.4 - Global Black + Mute'));
+app.get('/', (req, res) => res.send('Bot Running - v8.5 - Global Black + Mute + Anti Linked'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
