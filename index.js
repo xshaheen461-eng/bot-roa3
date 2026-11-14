@@ -11,6 +11,7 @@ let qrCode = '';
 let sock = null;
 let whiteList = [];
 let blackList = [];
+let exemptGroups = [];
 let lockLinks = false;
 let CASTLE_MODE = false;
 let RAID_MODE = false;
@@ -22,6 +23,7 @@ let knownMembers = {};
 let reportedMembers = new Set();
 try { whiteList = JSON.parse(fs.readFileSync('whitelist.json')); } catch(e) { whiteList = []; }
 try { blackList = JSON.parse(fs.readFileSync('blacklist.json')); } catch(e) { blackList = []; }
+try { exemptGroups = JSON.parse(fs.readFileSync('exempt.json')); } catch(e) { exemptGroups = []; }
 try { let s = JSON.parse(fs.readFileSync('settings.json')); lockLinks = s.lockLinks || false; CASTLE_MODE = false; } catch(e) {}
 let lidMap = {};
 try { lidMap = JSON.parse(fs.readFileSync('lidmap.json')) || {}; } catch(e) { lidMap = {}; }
@@ -29,10 +31,12 @@ const saveLists = () => {
   try {
     fs.writeFileSync('whitelist.json', JSON.stringify(whiteList));
     fs.writeFileSync('blacklist.json', JSON.stringify(blackList));
+    fs.writeFileSync('exempt.json', JSON.stringify(exemptGroups));
     fs.writeFileSync('settings.json', JSON.stringify({ lockLinks }));
     fs.writeFileSync('lidmap.json', JSON.stringify(lidMap));
   } catch(e) {}
 };
+const isExempt = (jid) => exemptGroups.indexOf(jid) !== -1;
 const norm = (s) => (s || '').replace(/[^0-9]/g,'');
 const getNum = (id) => norm((id || '').split(':')[0].split('@')[0]);
 const extractAllNumbers = (text) => {
@@ -119,14 +123,11 @@ function getTargets(text, ctx, quotedParticipant) {
   for (let n of extractAllNumbers(text)) add(n);
   return nums;
 }
-// ✅ v7.9 - وسّع الأرقام: من LID جيب الرقم، ومن الرقم جيب LID، باش الحظر يمسك الزوز
 async function expandTargets(nums, from) {
   let out = [];
   let add = (n) => { n = getNum(n); if (n && out.indexOf(n) === -1) out.push(n); };
   for (let n of nums) add(n);
-  // من lidMap
   for (let n of [...out]) { if (lidMap[n]) add(lidMap[n]); for (let k in lidMap) { if (lidMap[k] === n) add(k); } }
-  // من قايمة الأعضاء
   try {
     if (from && from.endsWith('@g.us')) {
       let meta = await sock.groupMetadata(from);
@@ -289,7 +290,7 @@ async function enableCastle(reason){
   CASTLE_MODE = true;
   try{
     const groups = await sock.groupFetchAllParticipating();
-    for(let jid in groups){ if(jid === CONTROL_GROUP) continue; try{ await sock.groupSettingUpdate(jid, 'announcement'); }catch(e){} }
+    for(let jid in groups){ if(jid === CONTROL_GROUP) continue; if(isExempt(jid)) continue; try{ await sock.groupSettingUpdate(jid, 'announcement'); }catch(e){} }
   }catch(e){}
   await notifyOwner('🏰🏰 تم تفعيل القلعة تلقائيا\nالسبب: ' + (reason || 'بأمر المالك') + '\nالوضع: بيضاء بس - الباقي طرد طول\nللإطفاء اكتب: .فتح القلعة');
 }
@@ -297,7 +298,7 @@ async function disableCastle(){
   CASTLE_MODE = false; contactTimes = [];
   try{
     const groups = await sock.groupFetchAllParticipating();
-    for(let jid in groups){ if(jid === CONTROL_GROUP) continue; try{ await sock.groupSettingUpdate(jid, 'not_announcement'); }catch(e){} }
+    for(let jid in groups){ if(jid === CONTROL_GROUP) continue; if(isExempt(jid)) continue; try{ await sock.groupSettingUpdate(jid, 'not_announcement'); }catch(e){} }
   }catch(e){}
   await notifyOwner('🏰 تم فتح القلعة بأمر المالك - رجع الوضع العادي');
 }
@@ -308,6 +309,7 @@ async function kickBlacklistedFromAllGroups() {
     const groups = await sock.groupFetchAllParticipating();
     for (let jid in groups) {
       if (jid === CONTROL_GROUP) continue;
+      if (isExempt(jid)) continue;
       if (kicked >= 2) break;
       try {
         const meta = groups[jid];
@@ -357,7 +359,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v7.9 - حظر وطرد بالرد والمنشن / بلاك ينطرد طول');
+      notifyOwner('✅ البوت متصل - ⚡ v8.1 - استثناء + سرعة');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -375,6 +377,7 @@ async function startBot() {
           const groups = await sock.groupFetchAllParticipating();
           for (let jid in groups) {
             if (jid === CONTROL_GROUP) continue;
+            if (isExempt(jid)) continue;
             const meta = groups[jid];
             groupNameCache[jid] = meta.subject || jid;
             for (let p of meta.participants) { if (p.phoneNumber) linkLidToPhone(p.id, p.phoneNumber); }
@@ -410,6 +413,7 @@ async function startBot() {
     try {
       const jid = u.id;
       if (!jid || jid === CONTROL_GROUP) return;
+      if (isExempt(jid)) return;
       let parts = u.participants || [];
       for (let p of parts) {
         let n = getNum(typeof p === 'string' ? p : (p.id || p));
@@ -434,6 +438,8 @@ async function startBot() {
   sock.ev.on('group.join-request', handleMembershipApproval);
   sock.ev.on('group-participants.update', async (u) => {
     try {
+      const jid0 = u.id;
+      if (jid0 && isExempt(jid0)) return;
       if (u.action === 'add' || u.action === 'invite' || u.action === 'join') {
         const jid = u.id;
         if (jid === CONTROL_GROUP) return;
@@ -533,14 +539,35 @@ async function startBot() {
         if (isOnlySticker || isOnlyImage) continue;
         if (m.key.fromMe) {
           let t = text.trim();
-          if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0 || t.indexOf('☠️') === 0 || t.indexOf('🏰') === 0 || t.indexOf('🔍') === 0 || t.indexOf('•───') === 0) continue;
+          if (t.indexOf('✅') === 0 || t.indexOf('🚫') === 0 || t.indexOf('🤍') === 0 || t.indexOf('🔒') === 0 || t.indexOf('🔗') === 0 || t.indexOf('╭') === 0 || t.indexOf('⚠️') === 0 || t.indexOf('🧹') === 0 || t.indexOf('📌') === 0 || t.indexOf('🚨') === 0 || t.indexOf('☠️') === 0 || t.indexOf('🏰') === 0 || t.indexOf('🔍') === 0 || t.indexOf('•───') === 0 || t.indexOf('⚡') === 0) continue;
         }
         const isOwnerSender = isOwner(senderNum) || isOwner(senderLid) || m.key.fromMe;
         const isWhiteSender = isWhite(senderNum) || isWhite(senderLid) || (lidMap[senderLid] && isWhite(lidMap[senderLid]));
         const isBlackSender = isBlack(senderNum) || isBlack(senderLid);
         const lower = text.toLowerCase().trim().replace(/_/g,' ');
+        const isExemptGroup = isGroup && isExempt(from) && from !== CONTROL_GROUP;
+        if (isExemptGroup) {
+          let allowOwnerExemptCmd = isOwnerSender && (lower.includes('.الغاء استثناء') || lower.includes('.الغاء الاستثناء') || lower === '.استثناءات' || lower === '.قائمة استثناء' || lower === '.ping' || lower === '.سرعة' || lower === '.سرعه');
+          if (!allowOwnerExemptCmd) continue;
+        }
+        // ✅ v8.1 - .سرعة
+        if (isOwnerSender && (lower === '.سرعة' || lower === '.سرعه' || lower === '.speed')) {
+          let sentTime = m.messageTimestamp ? m.messageTimestamp * 1000 : Date.now();
+          let now = Date.now();
+          let latency = now - sentTime;
+          let start = Date.now();
+          await sock.sendMessage(from, { text: '⚡ نقيس في السرعة...' });
+          let ping = Date.now() - start;
+          let total = latency + ping;
+          let verdict = '';
+          if (total < 500) verdict = '✅ ممتاز - أسرع من أغلب بوتات المبندين';
+          else if (total < 1000) verdict = '🟡 متوسط - قريب من بوتات المبندين';
+          else verdict = '🔴 بطيء - بوت المبندين ممكن يسبقك، غير الهوستينج';
+          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (total / 1000).toFixed(2) + ' ثانية\n🏓 بينج الرد: ' + ping + 'ms\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv8.1' });
+          continue;
+        }
         if (isOwnerSender && lower === '.ping') {
-          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v7.9 - حظر وطرد بالرد والمنشن / بلاك ينطرد طول - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') });
+          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v8.1 - استثناء + سرعة - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
           continue;
         }
         const _ctxEarly = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
@@ -601,11 +628,30 @@ async function startBot() {
         }
         if (isAdminSender && isContact) continue;
         if (isOwnerSender) {
-          let isSensitiveCmd = lower.includes('.حظر') || lower.includes('.ابيض') || lower.includes('.طرد') || lower.includes('.فحص') || lower.includes('.تنظيف') || lower.includes('.قلعة') || lower.includes('.قلعه') || lower.includes('.تشخيص') || lower.includes('.ادوات') || lower.includes('.بيضاء') || lower.includes('.بلاك') || lower.includes('.قائمة') || lower.includes('.حذف') || lower.includes('.استقبال') || lower.includes('.قبول') || lower.includes('.تم القبول') || lower.includes('.سكر الاستقبال') || lower.includes('.قسيمة') || lower.includes('.قفل الروابط') || lower.includes('.فتح الروابط') || lower.includes('.فك حظر') || lower.includes('.الغاء');
+          let isSensitiveCmd = lower.includes('.حظر') || lower.includes('.ابيض') || lower.includes('.طرد') || lower.includes('.فحص') || lower.includes('.تنظيف') || lower.includes('.قلعة') || lower.includes('.قلعه') || lower.includes('.تشخيص') || lower.includes('.ادوات') || lower.includes('.بيضاء') || lower.includes('.بلاك') || lower.includes('.قائمة') || lower.includes('.حذف') || lower.includes('.استقبال') || lower.includes('.قبول') || lower.includes('.تم القبول') || lower.includes('.سكر الاستقبال') || lower.includes('.قسيمة') || lower.includes('.قفل الروابط') || lower.includes('.فتح الروابط') || lower.includes('.فك حظر') || lower.includes('.الغاء') || lower.includes('.استثناء') || lower.includes('.سرعة') || lower.includes('.سرعه');
           if (isSensitiveCmd && from !== CONTROL_GROUP) hideOwnerCommand(from, m);
           let r = async (txt) => { if (isSensitiveCmd && from !== CONTROL_GROUP) { await replyControl(txt); } else { await reply(from, txt); } };
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
           if (lower === '.قسيمة' || lower === '.قسيمه' || lower === '.تجربة قسيمة') { await sendSessionReport(from, '999999999@test', false); await r('✅ بعت قسيمة تجريبية، شوف قروب التحكم'); continue; }
+          if (lower === '.استثناء') {
+            if (!isGroup) { await r('⚠️ الاستثناء يخدم في القروب بس - افتح القروب واكتب .استثناء'); continue; }
+            if (from === CONTROL_GROUP) { await r('⛔ ما تقدرش تستثني قروب التحكم'); continue; }
+            if (!isExempt(from)) { exemptGroups.push(from); saveLists(); }
+            await r('✅ تم استثناء هادا القروب - البوت معاش حيلمسه بكل\nلا رابط، لا فوروارد، لا جهة اتصال، لا طرد، لا قلعة\nللإلغاء اكتب: .الغاء استثناء');
+            await notifyOwner('✅ استثنيت قروب ' + (groupNameCache[from] || from) + '\nID: ' + from);
+            continue;
+          }
+          if (lower === '.الغاء استثناء' || lower === '.الغاء الاستثناء' || lower === '.فك استثناء' || lower === '.إلغاء استثناء') {
+            if (!isGroup) { await r('⚠️ الغاء الاستثناء يخدم في القروب بس'); continue; }
+            exemptGroups = exemptGroups.filter(x => x !== from); saveLists();
+            await r('✅ لغيت استثناء هادا القروب - رجعت الحماية');
+            continue;
+          }
+          if (lower === '.استثناءات' || lower === '.قائمة استثناء' || lower === '.قايمة استثناء') {
+            let list = exemptGroups.length ? exemptGroups.map(j => (groupNameCache[j] || j) + '\n' + j).join('\n\n') : 'فاضية - مافيش قروب مستثنى';
+            await r('🛡️ القروبات المستثناة:\n' + list);
+            continue;
+          }
           if (lower === '.استقبال' || lower === '.قبول' || lower === '.استقبال شغال') {
             ACCEPT_MODE = true; clearTimeout(acceptTimer);
             acceptTimer = setTimeout(()=>{ ACCEPT_MODE = false; notifyOwner('✅ انتهى وضع الاستقبال - رجعت الحماية'); }, 15*60*1000);
@@ -679,7 +725,7 @@ async function startBot() {
               const groups = await sock.groupFetchAllParticipating();
               let total = Object.keys(groups).length; let adminList = [];
               for (let jid in groups) { const meta = groups[jid]; let me2 = null; for (let p of meta.participants) { if (isMe(p)) me2 = p; } if (me2 && me2.admin) adminList.push(meta.subject || jid); }
-              let msg = '🔍 تشخيص:\nرقمي: ' + OWNER_NUMBER + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\nبيضاء: ' + whiteList.length + '\nبلاك: ' + blackList.length + '\nقلعة: ' + (CASTLE_MODE ? 'ON' : 'OFF');
+              let msg = '🔍 تشخيص:\nرقمي: ' + OWNER_NUMBER + '\nمجموع القروبات: ' + total + '\nأدمن في: ' + adminList.length + '\nبيضاء: ' + whiteList.length + '\nبلاك: ' + blackList.length + '\nمستثنى: ' + exemptGroups.length + '\nقلعة: ' + (CASTLE_MODE ? 'ON' : 'OFF');
               await r(msg);
             } catch(e) { await r('خطأ تشخيص: ' + e.message); }
             continue;
@@ -688,25 +734,26 @@ async function startBot() {
             let menu = '╭─── 🍷 ───╮\n';
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
+            menu += '│ 🛡️ مستثنى: ' + exemptGroups.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v7.9 - حظر وطرد بالرد والمنشن\n';
+            menu += '│ ⚡ السرعة: v8.1 - استثناء + سرعة\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - النص محجوب\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
-            menu += '• .ايدي\n• .تشخيص\n• .قسيمة\n• .استقبال / .تم القبول\n• .فحص / .فحص الكل\n• رد + .ابيض / .حظر / .طرد / .فك حظر\n• منشن + .حظر / .طرد / .ابيض\n• .حظر جماعي\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping';
+            menu += '• .ايدي\n• .تشخيص\n• .قسيمة\n• .سرعة\n• .استقبال / .تم القبول\n• .استثناء / .الغاء استثناء / .استثناءات\n• .فحص / .فحص الكل\n• رد + .ابيض / .حظر / .طرد / .فك حظر\n• منشن + .حظر / .طرد / .ابيض\n• .حظر جماعي\n• .بيضاء / .بلاك / .قائمة\n• .حذف - رد على رسالة\n• .حذف بلاك\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping';
             await r(menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
             let meta = await sock.groupMetadata(from);
             let admins = meta.participants.filter((p) => p.admin).length;
-            let info = '╭─── 🍷 ───╮\n│ 📛 القروب: ' + meta.subject + '\n│ 👥 الأعضاء: ' + meta.participants.length + '\n│ 🛡️ المشرفين: ' + admins + '\n╰─── 🍷 ───╯';
+            let info = '╭─── 🍷 ───╮\n│ 📛 القروب: ' + meta.subject + '\n│ 👥 الأعضاء: ' + meta.participants.length + '\n│ 🛡️ المشرفين: ' + admins + '\n│ 🛡️ مستثنى: ' + (isExempt(from) ? 'ايه ✅' : 'لا') + '\n╰─── 🍷 ───╯';
             await reply(from, info); continue;
           }
           if (lower === '.بيضاء') { await r('🤍 البيضاء:\n' + (whiteList.length ? whiteList.join('\n') : 'فاضية')); continue; }
           if (lower === '.بلاك') { await r('🚫 البلاك:\n' + (blackList.length ? blackList.join('\n') : 'فاضي')); continue; }
-          if (lower === '.قائمة') { await r('🤍 بيضاء: ' + whiteList.length + '\n🚫 بلاك: ' + blackList.length + '\n🏰 قلعة: ' + (CASTLE_MODE ? 'ON' : 'OFF')); continue; }
+          if (lower === '.قائمة') { await r('🤍 بيضاء: ' + whiteList.length + '\n🚫 بلاك: ' + blackList.length + '\n🛡️ مستثنى: ' + exemptGroups.length + '\n🏰 قلعة: ' + (CASTLE_MODE ? 'ON' : 'OFF')); continue; }
           if (lower === '.فتح' && isGroup) { try { await sock.groupSettingUpdate(from, 'not_announcement'); await reply(from, '✅ فتحت القروب'); } catch(e) {} continue; }
           if ((lower === '.سكر' || lower === '.قفل') && isGroup) { try { await sock.groupSettingUpdate(from, 'announcement'); await reply(from, '🔒 سكرت القروب'); } catch(e) {} continue; }
           if (lower === '.قفل الروابط') { lockLinks = true; saveLists(); await r('🔗 قفلت الروابط'); continue; }
@@ -748,7 +795,6 @@ async function startBot() {
             } else { await r('❌ فشل الطرد - تأكد ان البوت أدمن، والشخص مش أدمن، وجرب ترد على رسالته مباشرة'); }
             continue;
           }
-          // ✅ v7.9 - .فك حظر يخدم بالرد والمنشن الزوز، ويفك الرقم والـ LID الزوز
           if (lower.includes('.فك حظر') || lower.includes('.الغاء حظر') || lower.includes('.الغاء بلاك')) {
             let nums = getTargets(text, ctx, quotedParticipant);
             let expanded = await expandTargets(nums, from);
@@ -762,7 +808,6 @@ async function startBot() {
             for (let n of expanded) whiteList = whiteList.filter((x) => x !== n);
             saveLists(); await r('✅ نحيت ' + expanded.length + ' رقم من البيضاء'); continue;
           }
-          // ✅ v7.9 - .حظر يخدم بالرد والمنشن الزوز، ويحظر الرقم والـ LID الزوز
           if (lower.includes('.حظر الكل') || lower.includes('.حظر جماعي') || lower.includes('.حظر') || lower.includes('.اضف بلاك')) {
             let nums = getTargets(text, ctx, quotedParticipant);
             let expanded = await expandTargets(nums, from);
@@ -779,7 +824,6 @@ async function startBot() {
             } else { await r('⚠️ رد على رسالته ولا تاقيه ولا ابعث رقمه + .حظر\nأو الصق قايمة أرقام واكتب .حظر'); }
             continue;
           }
-          // ✅ v7.9 - .ابيض يخدم بالرد والمنشن الزوز
           if (lower.includes('.ابيض')) {
             let nums = getTargets(text, ctx, quotedParticipant);
             let expanded = await expandTargets(nums, from);
@@ -909,7 +953,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v7.9 - Control Only - Silent'));
+app.get('/', (req, res) => res.send('Bot Running - v8.1 - Control Only - Silent'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
