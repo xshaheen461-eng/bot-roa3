@@ -353,13 +353,13 @@ function lockGroupForContact(jid) {
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
   const { version } = await fetchLatestBaileysVersion();
-  sock = makeWASocket({ version, auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: false, syncFullHistory: false, keepAliveIntervalMs: 10000, markOnlineOnConnect: false });
+  sock = makeWASocket({ version, auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: false, syncFullHistory: false, keepAliveIntervalMs: 5000, markOnlineOnConnect: false });
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', (u) => {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v8.1 - استثناء + سرعة');
+      notifyOwner('✅ البوت متصل - ⚡ v8.2 سرعة قصوى - استثناء + سرعة');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -371,7 +371,7 @@ async function startBot() {
         } catch(e) {}
       })();
       setTimeout(() => { kickBlacklistedFromAllGroups(); }, 8000);
-      setInterval(() => { kickBlacklistedFromAllGroups(); }, 5*60*1000);
+      setInterval(() => { kickBlacklistedFromAllGroups(); }, 10*60*1000);
       setInterval(async () => {
         try {
           const groups = await sock.groupFetchAllParticipating();
@@ -402,7 +402,7 @@ async function startBot() {
             }
           }
         } catch(e) {}
-      }, 60*1000);
+      }, 180*1000);
     }
     if (u.connection === 'close') {
       const should = (u.lastDisconnect && u.lastDisconnect.error && u.lastDisconnect.error.output && u.lastDisconnect.error.output.statusCode) !== DisconnectReason.loggedOut;
@@ -550,24 +550,16 @@ async function startBot() {
           let allowOwnerExemptCmd = isOwnerSender && (lower.includes('.الغاء استثناء') || lower.includes('.الغاء الاستثناء') || lower === '.استثناءات' || lower === '.قائمة استثناء' || lower === '.ping' || lower === '.سرعة' || lower === '.سرعه');
           if (!allowOwnerExemptCmd) continue;
         }
-        // ✅ v8.1 - .سرعة
+        // ✅ v8.2 - .سرعة برسالة وحدة بس باش ما يبطاش
         if (isOwnerSender && (lower === '.سرعة' || lower === '.سرعه' || lower === '.speed')) {
           let sentTime = m.messageTimestamp ? m.messageTimestamp * 1000 : Date.now();
-          let now = Date.now();
-          let latency = now - sentTime;
-          let start = Date.now();
-          await sock.sendMessage(from, { text: '⚡ نقيس في السرعة...' });
-          let ping = Date.now() - start;
-          let total = latency + ping;
-          let verdict = '';
-          if (total < 500) verdict = '✅ ممتاز - أسرع من أغلب بوتات المبندين';
-          else if (total < 1000) verdict = '🟡 متوسط - قريب من بوتات المبندين';
-          else verdict = '🔴 بطيء - بوت المبندين ممكن يسبقك، غير الهوستينج';
-          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (total / 1000).toFixed(2) + ' ثانية\n🏓 بينج الرد: ' + ping + 'ms\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv8.1' });
+          let latency = Date.now() - sentTime;
+          let verdict = latency < 400 ? '✅ ممتاز - أسرع من أغلب بوتات المبندين' : latency < 800 ? '🟡 متوسط - قريب من بوتات المبندين' : '🔴 بطيء - السيرفر راقد، غير الهوستينج';
+          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (latency / 1000).toFixed(2) + ' ثانية\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv8.2' });
           continue;
         }
         if (isOwnerSender && lower === '.ping') {
-          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v8.1 - استثناء + سرعة - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
+          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v8.2 سرعة قصوى - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
           continue;
         }
         const _ctxEarly = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
@@ -616,7 +608,7 @@ async function startBot() {
         let isAdminSender = false;
         if (isGroup && !isOwnerSender) {
           let cacheKey = from + '-' + senderLid;
-          if (adminCache[cacheKey] !== undefined && Date.now() - adminCache[cacheKey].time < 60000) { isAdminSender = adminCache[cacheKey].isAdmin; }
+          if (adminCache[cacheKey] !== undefined && Date.now() - adminCache[cacheKey].time < 300000) { isAdminSender = adminCache[cacheKey].isAdmin; }
           else {
             try {
               let meta = await sock.groupMetadata(from);
@@ -736,7 +728,7 @@ async function startBot() {
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🛡️ مستثنى: ' + exemptGroups.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v8.1 - استثناء + سرعة\n';
+            menu += '│ ⚡ السرعة: v8.2 سرعة قصوى\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - النص محجوب\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
@@ -953,7 +945,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v8.1 - Control Only - Silent'));
+app.get('/', (req, res) => res.send('Bot Running - v8.2 - Control Only - Silent'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
