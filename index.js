@@ -137,16 +137,13 @@ function warLock(jid) {
   fastLock(jid);
   setTimeout(() => { if(!CASTLE_MODE) fastUnlock(jid); }, 30000);
 }
-async function tripleStrike(jid, m, sender) {
-  await Promise.all([
-    sock.sendMessage(jid, { delete: m.key }).catch(()=>{}),
-    sock.groupParticipantsUpdate(jid, [sender], 'remove').catch(()=>{})
-  ]);
+// ✅ v7.7 - ما يستناش، يضرب طول
+function tripleStrike(jid, m, sender) {
+  sock.sendMessage(jid, { delete: m.key }).catch(()=>{});
+  sock.groupParticipantsUpdate(jid, [sender], 'remove').catch(()=>{});
 }
-// ✅ v7.6 - صلحنا isMaliciousLink: معاش نحسب JSON، نحسب النص اللي باين بس
 function isMaliciousLink(t, m) {
   if (!t && !m) return false;
-  // ✅ رياكشن / بروتوكول / نظام = مش تفجير
   if (m && m.message?.reactionMessage) return false;
   if (m && m.message?.protocolMessage) return false;
   if (m && m.message?.pollUpdateMessage) return false;
@@ -154,7 +151,6 @@ function isMaliciousLink(t, m) {
   if (m && m.message?.stickerMessage && !t) return false;
   if (m && m.message?.imageMessage && !t) return false;
   if (m && m.message?.videoMessage && !t) return false;
-  // ✅ نحسب النص بس، مش JSON - هادي كانت المشكلة
   let full = (t || '');
   if (maliciousCache.has(full.slice(0,100))) return true;
   if (!full) return false;
@@ -185,13 +181,14 @@ function getMsgPreview(m, text) {
   if (m?.message?.pollCreationMessage) return '[استطلاع: ' + (m.message.pollCreationMessage.name || '') + ']';
   return '(بدون نص)';
 }
+// ✅ v7.7 - احذف واطرد الأول، وبعدين جيب اسم القروب وابعت التقرير
 async function handleMalicious(jid, m, sender, senderNum, reason) {
   let safeLen = (m?.message?.conversation || m?.message?.extendedTextMessage?.text || '').length;
-  let gname = await getGroupName(jid);
   fastDelete(jid, m.key);
   fastKick(jid, sender);
   if (blackList.indexOf(senderNum) === -1) { blackList.push(senderNum); saveLists(); }
   maliciousCache.add((m.message?.conversation || '').slice(0,100));
+  let gname = groupNameCache[jid] || jid;
   notifyOwner('💣 رابط ملغم من ' + senderNum + ' في قروب ' + gname + '\nالسبب: ' + reason + '\nطول الرسالة: ' + safeLen + ' حرف - [النص محجوب]\n⚡ حذف + طرد فقط');
 }
 let linkCount = {};
@@ -324,7 +321,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v7.6 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش / رياكشن ودخول ما ينطردش');
+      notifyOwner('✅ البوت متصل - ⚡ v7.7 - حذف فوري / رياكشن ودخول ما ينطردش');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -463,7 +460,6 @@ async function startBot() {
     let messages = up.messages;
     for (const m of messages) {
       try {
-        // ✅ v7.6 - تجاهل الرياكشن + رسائل النظام + الدخول والخروج من هنا قبل أي فحص
         if (m.message?.reactionMessage) continue;
         if (m.message?.protocolMessage) continue;
         if (m.message?.pollUpdateMessage) continue;
@@ -496,7 +492,17 @@ async function startBot() {
         const isBlackSender = isBlack(senderNum) || isBlack(senderLid);
         const lower = text.toLowerCase().trim().replace(/_/g,' ');
         if (isOwnerSender && lower === '.ping') {
-          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v7.6 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش / رياكشن ودخول ما ينطردش - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') });
+          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v7.7 - حذف فوري / رياكشن ودخول ما ينطردش - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') });
+          continue;
+        }
+        // ✅ v7.7 - فحص سريع لأوامر المالك قبل فحص الأدمن - باش .حذف ما يتأخرش
+        const _ctxEarly = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
+        const _quotedParticipantEarly = _ctxEarly ? (_ctxEarly.participantPn || _ctxEarly.participant) : null;
+        const _quotedKeyEarly = (_ctxEarly && _ctxEarly.stanzaId) ? { remoteJid: from, id: _ctxEarly.stanzaId, participant: _quotedParticipantEarly, fromMe: false } : null;
+        if (isOwnerSender && isGroup && lower === '.حذف' && _quotedKeyEarly) {
+          fastDelete(from, _quotedKeyEarly);
+          fastDelete(from, m.key);
+          if (from !== CONTROL_GROUP) { sock.sendMessage(CONTROL_GROUP, { text: '✅ تم الحذف فوري في قروب ' + (groupNameCache[from] || from) }).catch(()=>{}); }
           continue;
         }
         if (isGroup && from !== CONTROL_GROUP && isContact && !isOwnerSender && !isWhiteSender) {
@@ -636,7 +642,7 @@ async function startBot() {
             menu += '│ 🤍 البيضاء: ' + whiteList.length + '\n';
             menu += '│ 🚫 البلاك: ' + blackList.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v7.6 - عنده رقم يقعد / جديد من غير رقم ينطرد / كلمة عادية ما تطردش / رياكشن ودخول ما ينطردش\n';
+            menu += '│ ⚡ السرعة: v7.7 - حذف فوري / رياكشن ودخول ما ينطردش\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - النص محجوب\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
@@ -659,8 +665,7 @@ async function startBot() {
           if (lower === '.قفل الروابط') { lockLinks = true; saveLists(); await r('🔗 قفلت الروابط'); continue; }
           if (lower === '.فتح الروابط') { lockLinks = false; saveLists(); await r('🔗 فتحت الروابط'); continue; }
           if (lower === '.حذف' && isGroup) {
-            if (quotedParticipant && isWhite(getNum(quotedParticipant))) { await r('🤍 هذا في البيضاء'); continue; }
-            if (quotedKey) { await deleteMsg(from, quotedKey); notifyOwner('✅ تم الحذف في قروب ' + from + '\nشن بعت: ' + getMsgPreview(m, text)); }
+            if (quotedKey) { fastDelete(from, quotedKey); notifyOwner('✅ تم الحذف في قروب ' + from + '\nشن بعت: ' + getMsgPreview(m, text)); }
             else { await r('⚠️ رد على الرسالة اللي تبي تحذفها'); }
             continue;
           }
@@ -840,7 +845,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v7.6 - Control Only - Silent'));
+app.get('/', (req, res) => res.send('Bot Running - v7.7 - Control Only - Silent'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
