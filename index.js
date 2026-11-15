@@ -371,7 +371,7 @@ function lockGroupForContact(jid) {
   if (contactLockTimers[jid]) clearTimeout(contactLockTimers[jid]);
   contactLockTimers[jid] = setTimeout(() => { if(!CASTLE_MODE) fastUnlock(jid); }, 5*60*1000);
 }
-// v8.9 - WILLIAM: أدمن + بوت، ينعد في الزوز
+// v9.0 - superadmin مش بوت، admin زي WILLIAM ينعد بوت+أدمن
 function isLinkedDevice(p) {
   if (typeof p === 'object' && p.isBot) return true;
   if (typeof p === 'object' && p.id && p.id.includes('@bot')) return true;
@@ -386,9 +386,10 @@ function isBotAccount(p) {
   if (typeof p === 'object' && p.id && p.id.includes('@bot')) return true;
   return isLinkedDevice(p);
 }
-// أي أدمن مش مالك ومش بيضاء ومش البوت نفسه = مشبوه، ينعد بوت + أدمن في الفحص بس، ما ينطردش تلقائي
+function isSuperAdmin(p) { return p && p.admin === 'superadmin'; }
 function isAdminBotSuspect(p) {
   if (!p || !p.admin) return false;
+  if (isSuperAdmin(p)) return false;
   if (isMe(p)) return false;
   if (isWhiteParticipant(p)) return false;
   if (isOwner(getParticipantNum(p))) return false;
@@ -403,7 +404,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v8.9 بلاك + كتم + فحص بوت+أدمن');
+      notifyOwner('✅ البوت متصل - ⚡ v9.0 بلاك + كتم + فحص بوت+أدمن + superadmin');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -619,11 +620,11 @@ async function startBot() {
           let sentTime = m.messageTimestamp ? m.messageTimestamp * 1000 : Date.now();
           let latency = Date.now() - sentTime;
           let verdict = latency < 400 ? '✅ ممتاز - أسرع من أغلب بوتات المبندين' : latency < 800 ? '🟡 متوسط - قريب من بوتات المبندين' : '🔴 بطيء - السيرفر راقد، غير الهوستينج';
-          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (latency / 1000).toFixed(2) + ' ثانية\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv8.9 بلاك + كتم + فحص بوت+أدمن' });
+          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (latency / 1000).toFixed(2) + ' ثانية\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv9.0 بلاك + كتم + فحص بوت+أدمن' });
           continue;
         }
         if (isOwnerSender && lower === '.ping') {
-          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v8.9 بلاك + كتم + فحص بوتات - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + ' - حماية بوت: ' + (ANTI_LINKED ? 'ON 🤖' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
+          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v9.0 بلاك + كتم + فحص بوتات - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + ' - حماية بوت: ' + (ANTI_LINKED ? 'ON 🤖' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
           continue;
         }
         const _ctxEarly = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
@@ -774,10 +775,11 @@ async function startBot() {
               let me = null; for (let p of meta.participants) { if (isMe(p)) me = p; }
               let iAmAdmin = me && me.admin;
               if (!iAmAdmin) { await r('⚠️ البوت مش أدمن هنا، ما يقدرش يطرد'); continue; }
-              let noNumberList = []; let linkedList = []; let adminList = [];
+              let noNumberList = []; let linkedList = []; let adminList = []; let superAdminList = [];
               for (let p of meta.participants) {
                 let n = getParticipantNum(p);
                 if (isMe(p)) continue; if (isWhiteParticipant(p)) continue; if (isOwner(n)) continue;
+                if (isSuperAdmin(p)) { superAdminList.push(n + ' (مولى القروب)'); continue; }
                 if (p.admin) { adminList.push(n); if (isAdminBotSuspect(p)) linkedList.push(n + ' (أدمن + بوت)'); continue; }
                 if (isBotAccount(p)) { linkedList.push(n); continue; }
                 if (!p.phoneNumber) noNumberList.push(n);
@@ -792,7 +794,7 @@ async function startBot() {
                 }
               }
               saveLists();
-              await r('🏰 فحص الكل كمل في ' + from + ':\n👥 فحصت: ' + meta.participants.length + '\n👻 من غير رقم لقيت: ' + noNumberList.length + '\n🤖 بوت لقيت: ' + linkedList.length + '\n🛡️ أدمن لقيت: ' + adminList.length + '\n✅ طردت: ' + kickedList.length + ' (الأدمن ما ينطردوش تلقائي)\n\n🤖 بوتات:\n' + (linkedList.length ? linkedList.join('\n') : 'مافيش') + '\n\n🛡️ أدمن:\n' + (adminList.length ? adminList.join('\n') : 'مافيش'));
+              await r('🏰 فحص الكل كمل في ' + from + ':\n👥 فحصت: ' + meta.participants.length + '\n👻 من غير رقم لقيت: ' + noNumberList.length + '\n🤖 بوت لقيت: ' + linkedList.length + '\n🛡️ أدمن لقيت: ' + adminList.length + '\n👑 مولى القروب لقيت: ' + superAdminList.length + '\n✅ طردت: ' + kickedList.length + ' (الأدمن ما ينطردوش تلقائي)\n\n🤖 بوتات:\n' + (linkedList.length ? linkedList.join('\n') : 'مافيش') + '\n\n🛡️ أدمن:\n' + (adminList.length ? adminList.join('\n') : 'مافيش') + '\n\n👑 مولى القروب:\n' + (superAdminList.length ? superAdminList.join('\n') : 'مافيش'));
             } catch(e) { await r('خطأ فحص الكل: ' + e.message); }
             continue;
           }
@@ -802,10 +804,11 @@ async function startBot() {
               let meta = await sock.groupMetadata(from);
               let me = null; for (let p of meta.participants) { if (isMe(p)) me = p; }
               let iAmAdmin = me && me.admin;
-              let noNumberList = []; let blackListFound = []; let linkedList = []; let adminList = []; let total = meta.participants.length;
+              let noNumberList = []; let blackListFound = []; let linkedList = []; let adminList = []; let superAdminList = []; let total = meta.participants.length;
               for (let p of meta.participants) {
                 let n = getParticipantNum(p);
                 if (isMe(p)) continue; if (isWhiteParticipant(p)) continue; if (isOwner(n)) continue;
+                if (isSuperAdmin(p)) { superAdminList.push(n); continue; }
                 if (p.admin) { adminList.push(n); if (isAdminBotSuspect(p)) linkedList.push(n + ' (أدمن + بوت)'); continue; }
                 if (isBotAccount(p)) { linkedList.push(n); continue; }
                 if (!p.phoneNumber) noNumberList.push(n);
@@ -813,12 +816,13 @@ async function startBot() {
               }
               if (!iAmAdmin) {
                 let msg = '🔍 فحص - عد بس (البوت مش ادمن هنا) في ' + from + ':\n';
-                msg += '👥 اجمالي الاعضاء: ' + total + '\n👻 جدد من غير رقم: ' + noNumberList.length + '\n🤖 بوت: ' + linkedList.length + '\n🛡️ أدمن: ' + adminList.length + '\n🚫 من البلاك العام: ' + blackListFound.length + '\n';
+                msg += '👥 اجمالي الاعضاء: ' + total + '\n👻 جدد من غير رقم: ' + noNumberList.length + '\n🤖 بوت: ' + linkedList.length + '\n🛡️ أدمن: ' + adminList.length + '\n👑 مولى القروب: ' + superAdminList.length + '\n🚫 من البلاك العام: ' + blackListFound.length + '\n';
                 if (linkedList.length) msg += '\n🤖 بوتات:\n' + linkedList.join('\n') + '\n';
                 if (adminList.length) msg += '\n🛡️ أدمن:\n' + adminList.join('\n') + '\n';
+                if (superAdminList.length) msg += '\n👑 مولى القروب:\n' + superAdminList.join('\n') + '\n';
                 if (noNumberList.length) msg += '\n👻 جدد من غير رقم:\n' + noNumberList.join('\n') + '\n';
                 if (blackListFound.length) msg += '\n🚫 بلاك عام:\n' + blackListFound.join('\n');
-                if (!noNumberList.length && !blackListFound.length && !linkedList.length && !adminList.length) msg += '✅ القروب نظيف'; else msg += '\n⚠️ خلي البوت ادمن باش يطردهم، توا عد بس';
+                if (!noNumberList.length && !blackListFound.length && !linkedList.length && !adminList.length && !superAdminList.length) msg += '✅ القروب نظيف'; else msg += '\n⚠️ خلي البوت ادمن باش يطردهم، توا عد بس';
                 await r(msg); continue;
               }
               let kickedList = [];
@@ -831,12 +835,13 @@ async function startBot() {
                 if (ok) { kickedList.push(n); if (blackList.indexOf(n) === -1) blackList.push(n); }
               }
               saveLists();
-              let msg2 = '🏰 فحص كمل في ' + from + ':\n👥 فحصت: ' + total + '\n👻 جدد من غير رقم لقيت: ' + noNumberList.length + '\n🤖 بوت لقيت: ' + linkedList.length + '\n🛡️ أدمن لقيت: ' + adminList.length + '\n🚫 بلاك عام لقيت: ' + blackListFound.length + '\n✅ طردت: ' + kickedList.length + ' (الأدمن ما ينطردوش تلقائي)';
+              let msg2 = '🏰 فحص كمل في ' + from + ':\n👥 فحصت: ' + total + '\n👻 جدد من غير رقم لقيت: ' + noNumberList.length + '\n🤖 بوت لقيت: ' + linkedList.length + '\n🛡️ أدمن لقيت: ' + adminList.length + '\n👑 مولى القروب لقيت: ' + superAdminList.length + '\n🚫 بلاك عام لقيت: ' + blackListFound.length + '\n✅ طردت: ' + kickedList.length + ' (الأدمن ما ينطردوش تلقائي)';
               if (linkedList.length) msg2 += '\n\n🤖 بوتات:\n' + linkedList.join('\n');
               if (adminList.length) msg2 += '\n\n🛡️ أدمن:\n' + adminList.join('\n');
+              if (superAdminList.length) msg2 += '\n\n👑 مولى القروب:\n' + superAdminList.join('\n');
               if (kickedList.length) msg2 += '\n\n✅ طردت:\n' + kickedList.join('\n');
               await r(msg2);
-              notifyOwner('🏰 فحص في ' + from + ' - لقيت ' + noNumberList.length + ' جدد من غير رقم و ' + linkedList.length + ' بوت و ' + adminList.length + ' أدمن وطردت ' + kickedList.length);
+              notifyOwner('🏰 فحص في ' + from + ' - لقيت ' + noNumberList.length + ' جدد من غير رقم و ' + linkedList.length + ' بوت و ' + adminList.length + ' أدمن و ' + superAdminList.length + ' مولى قروب وطردت ' + kickedList.length);
             } catch(e) { await r('خطأ فحص: ' + e.message); }
             continue;
           }
@@ -858,7 +863,7 @@ async function startBot() {
             menu += '│ 🔇 المكتومين: ' + mutedList.length + '\n';
             menu += '│ 🛡️ مستثنى: ' + exemptGroups.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v8.9 بلاك + كتم + فحص بوت+أدمن\n';
+            menu += '│ ⚡ السرعة: v9.0 بلاك + كتم + فحص بوت+أدمن\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - النص محجوب\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 🤖 حماية بوت: ' + (ANTI_LINKED ? 'شغالة ON' : 'طافية OFF') + '\n';
@@ -1077,7 +1082,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v8.9 - Global Black + Mute + Anti Bot + Admin Bot'));
+app.get('/', (req, res) => res.send('Bot Running - v9.0 - Global Black + Mute + Anti Bot + Superadmin'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
