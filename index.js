@@ -371,7 +371,6 @@ function lockGroupForContact(jid) {
   if (contactLockTimers[jid]) clearTimeout(contactLockTimers[jid]);
   contactLockTimers[jid] = setTimeout(() => { if(!CASTLE_MODE) fastUnlock(jid); }, 5*60*1000);
 }
-// v8.7 - طريقة بوت صاحبك: واتساب نفسه يقول isBot
 function isLinkedDevice(p) {
   if (typeof p === 'object' && p.isBot) return true;
   if (typeof p === 'object' && p.id && p.id.includes('@bot')) return true;
@@ -395,7 +394,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v8.7 بلاك + كتم + فحص بوتات isBot');
+      notifyOwner('✅ البوت متصل - ⚡ v8.8 بلاك + كتم + فحص بوتات + .داتا');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -611,11 +610,11 @@ async function startBot() {
           let sentTime = m.messageTimestamp ? m.messageTimestamp * 1000 : Date.now();
           let latency = Date.now() - sentTime;
           let verdict = latency < 400 ? '✅ ممتاز - أسرع من أغلب بوتات المبندين' : latency < 800 ? '🟡 متوسط - قريب من بوتات المبندين' : '🔴 بطيء - السيرفر راقد، غير الهوستينج';
-          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (latency / 1000).toFixed(2) + ' ثانية\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv8.7 بلاك + كتم + فحص بوتات isBot' });
+          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (latency / 1000).toFixed(2) + ' ثانية\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv8.8 بلاك + كتم + فحص بوتات + .داتا' });
           continue;
         }
         if (isOwnerSender && lower === '.ping') {
-          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v8.7 بلاك + كتم + فحص بوتات - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + ' - حماية بوت: ' + (ANTI_LINKED ? 'ON 🤖' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
+          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v8.8 بلاك + كتم + فحص بوتات - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + ' - حماية بوت: ' + (ANTI_LINKED ? 'ON 🤖' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
           continue;
         }
         const _ctxEarly = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
@@ -676,10 +675,29 @@ async function startBot() {
         }
         if (isAdminSender && isContact) continue;
         if (isOwnerSender) {
-          let isSensitiveCmd = lower.includes('.حظر') || lower.includes('.ابيض') || lower.includes('.طرد') || lower.includes('.فحص') || lower.includes('.تنظيف') || lower.includes('.قلعة') || lower.includes('.قلعه') || lower.includes('.تشخيص') || lower.includes('.ادوات') || lower.includes('.بيضاء') || lower.includes('.بلاك') || lower.includes('.قائمة') || lower.includes('.حذف') || lower.includes('.استقبال') || lower.includes('.قبول') || lower.includes('.تم القبول') || lower.includes('.سكر الاستقبال') || lower.includes('.قسيمة') || lower.includes('.قفل الروابط') || lower.includes('.فتح الروابط') || lower.includes('.فك حظر') || lower.includes('.الغاء') || lower.includes('.استثناء') || lower.includes('.سرعة') || lower.includes('.سرعه') || lower.includes('.كتم') || lower.includes('.فك كتم') || lower.includes('حماية بوت') || lower.includes('جهاز مرتبط');
+          let isSensitiveCmd = lower.includes('.حظر') || lower.includes('.ابيض') || lower.includes('.طرد') || lower.includes('.فحص') || lower.includes('.تنظيف') || lower.includes('.قلعة') || lower.includes('.قلعه') || lower.includes('.تشخيص') || lower.includes('.ادوات') || lower.includes('.بيضاء') || lower.includes('.بلاك') || lower.includes('.قائمة') || lower.includes('.حذف') || lower.includes('.استقبال') || lower.includes('.قبول') || lower.includes('.تم القبول') || lower.includes('.سكر الاستقبال') || lower.includes('.قسيمة') || lower.includes('.قفل الروابط') || lower.includes('.فتح الروابط') || lower.includes('.فك حظر') || lower.includes('.الغاء') || lower.includes('.استثناء') || lower.includes('.سرعة') || lower.includes('.سرعه') || lower.includes('.كتم') || lower.includes('.فك كتم') || lower.includes('.داتا') || lower.includes('حماية بوت') || lower.includes('جهاز مرتبط');
           if (isSensitiveCmd && from !== CONTROL_GROUP) hideOwnerCommand(from, m);
           let r = async (txt) => { if (isSensitiveCmd && from !== CONTROL_GROUP) { await replyControl(txt); } else { await reply(from, txt); } };
           if (lower === '.ايدي') { await reply(from, 'ID متع القروب:\n' + from); continue; }
+          if (lower === '.داتا') {
+            try {
+              let meta = await sock.groupMetadata(from);
+              let target = null;
+              if (quotedParticipant) target = meta.participants.find(x => getNum(x.id) === getNum(quotedParticipant) || (x.phoneNumber && getNum(x.phoneNumber) === getNum(quotedParticipant)));
+              else if (ctx && ctx.mentionedJid && ctx.mentionedJid.length) target = meta.participants.find(x => getNum(x.id) === getNum(ctx.mentionedJid[0]));
+              else {
+                let nums = getTargets(text, ctx, quotedParticipant);
+                if (nums.length) target = meta.participants.find(x => getNum(x.id) === nums[0] || (x.phoneNumber && getNum(x.phoneNumber) === nums[0]));
+              }
+              if (!target) { await r('⚠️ رد على رسالة WILLIAM واكتب .داتا'); continue; }
+              await r('DATA:\n' + JSON.stringify(target, null, 2).slice(0, 3000));
+              try {
+                let biz = await sock.getBusinessProfile(target.id);
+                await r('BIZ:\n' + JSON.stringify(biz, null, 2).slice(0, 2000));
+              } catch(e) { await r('BIZ ERROR: ' + e.message); }
+            } catch(e) { await r('داتا خطأ: ' + e.message); }
+            continue;
+          }
           if (lower === '.قسيمة' || lower === '.قسيمه' || lower === '.تجربة قسيمة') { await sendSessionReport(from, '999999999@test', false); await r('✅ بعت قسيمة تجريبية، شوف قروب التحكم'); continue; }
           if (lower === '.حماية بوت' || lower === '.حماية جهاز' || lower === '.جهاز مرتبط') { await r('🤖 حماية جهاز مرتبط: ' + (ANTI_LINKED ? 'شغالة ON' : 'طافية OFF') + '\n.حماية بوت تشغيل\n.حماية بوت اطفاء'); continue; }
           if (lower === '.حماية بوت تشغيل' || lower === '.تشغيل حماية بوت' || lower === '.قفل جهاز مرتبط') { ANTI_LINKED = true; saveLists(); await r('🤖 شغلت حماية جهاز مرتبط - أي بوت يخش حينطرد طول'); continue; }
@@ -821,14 +839,14 @@ async function startBot() {
             menu += '│ 🔇 المكتومين: ' + mutedList.length + '\n';
             menu += '│ 🛡️ مستثنى: ' + exemptGroups.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v8.7 بلاك + كتم + فحص بوتات isBot\n';
+            menu += '│ ⚡ السرعة: v8.8 بلاك + كتم + فحص بوتات + .داتا\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - النص محجوب\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 🤖 حماية بوت: ' + (ANTI_LINKED ? 'شغالة ON' : 'طافية OFF') + '\n';
             menu += '│ 📥 استقبال: ' + (ACCEPT_MODE ? 'شغال ON ✅' : 'طافي OFF') + '\n';
             menu += '╰─── 🍷 ───╯\n\n';
             menu += '⚙️ اوامر ⚙️\n';
-            menu += '• .ايدي\n• .تشخيص\n• .قسيمة\n• .سرعة\n• .حماية بوت / .حماية بوت تشغيل / .حماية بوت اطفاء\n• .استقبال / .تم القبول\n• .استثناء / .الغاء استثناء / .استثناءات\n• .فحص / .فحص الكل / .فحص بوتات\n• رد + .ابيض / .حظر / .طرد / .فك حظر / .كتم / .كتم الغاء\n• منشن + .حظر / .طرد / .ابيض / .كتم\n• .حظر جماعي\n• .بيضاء / .بلاك / .قائمة / .قائمة كتم\n• .حذف - رد على رسالة\n• .حذف بلاك / .حذف كتم\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping';
+            menu += '• .ايدي\n• .داتا - رد على رسالة WILLIAM\n• .تشخيص\n• .قسيمة\n• .سرعة\n• .حماية بوت / .حماية بوت تشغيل / .حماية بوت اطفاء\n• .استقبال / .تم القبول\n• .استثناء / .الغاء استثناء / .استثناءات\n• .فحص / .فحص الكل / .فحص بوتات\n• رد + .ابيض / .حظر / .طرد / .فك حظر / .كتم / .كتم الغاء\n• منشن + .حظر / .طرد / .ابيض / .كتم\n• .حظر جماعي\n• .بيضاء / .بلاك / .قائمة / .قائمة كتم\n• .حذف - رد على رسالة\n• .حذف بلاك / .حذف كتم\n• .فتح / .سكر\n• .قفل الروابط / .فتح الروابط\n• .معلومات\n• .قلعة / .فتح القلعة / .حالة القلعة\n• .ping';
             await r(menu); continue;
           }
           if (lower === '.معلومات' && isGroup) {
@@ -1040,7 +1058,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v8.7 - Global Black + Mute + Anti Bot isBot'));
+app.get('/', (req, res) => res.send('Bot Running - v8.8 - Global Black + Mute + Anti Bot + .داتا'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
