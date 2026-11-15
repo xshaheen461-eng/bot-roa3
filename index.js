@@ -371,12 +371,20 @@ function lockGroupForContact(jid) {
   if (contactLockTimers[jid]) clearTimeout(contactLockTimers[jid]);
   contactLockTimers[jid] = setTimeout(() => { if(!CASTLE_MODE) fastUnlock(jid); }, 5*60*1000);
 }
+// v8.7 - طريقة بوت صاحبك: واتساب نفسه يقول isBot
 function isLinkedDevice(p) {
-  let pStr = typeof p === 'string' ? p : (p.id || '');
+  if (typeof p === 'object' && p.isBot) return true;
+  if (typeof p === 'object' && p.id && p.id.includes('@bot')) return true;
   if (typeof p === 'object' && p.phoneNumber) return false;
+  let pStr = typeof p === 'string' ? p : (p.id || '');
   if (!pStr.includes(':')) return false;
   let device = pStr.split(':')[1].split('@')[0];
   return device && device !== '0';
+}
+function isBotAccount(p) {
+  if (typeof p === 'object' && p.isBot) return true;
+  if (typeof p === 'object' && p.id && p.id.includes('@bot')) return true;
+  return isLinkedDevice(p);
 }
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
@@ -387,7 +395,7 @@ async function startBot() {
     if (u.qr) { qrCode = u.qr; console.log('QR READY'); }
     if (u.connection === 'open') {
       qrCode = ''; console.log('Bot connected');
-      notifyOwner('✅ البوت متصل - ⚡ v8.6 بلاك + كتم + فحص بوتات');
+      notifyOwner('✅ البوت متصل - ⚡ v8.7 بلاك + كتم + فحص بوتات isBot');
       (async () => {
         try {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -473,14 +481,14 @@ async function startBot() {
       if (ANTI_LINKED && (u.action === 'add' || u.action === 'invite' || u.action === 'join')) {
         if (u.id !== CONTROL_GROUP) {
           for (let p of u.participants) {
-            if (!isLinkedDevice(p)) continue;
+            if (!isBotAccount(p)) continue;
             let pStr = typeof p === 'string' ? p : (p.id || '');
             let n = getNum(pStr);
             if (isWhite(n) || isOwner(n) || isWhiteParticipant(p)) continue;
             try { await sock.sendMessage(u.id, { text: `تم طرد @${n} 🤖\n(جهاز مرتبط)` }); } catch(e) {}
             try { await sock.groupParticipantsUpdate(u.id, [pStr], 'remove'); } catch(e) {}
             if (blackList.indexOf(n) === -1) { blackList.push(n); saveLists(); }
-            notifyOwner('🤖 طردت بوت جهاز مرتبط: ' + n + ' من قروب ' + u.id + '\nالسبب: دخل بجهاز مرتبط مش تلفون');
+            notifyOwner('🤖 طردت بوت جهاز مرتبط: ' + n + ' من قروب ' + u.id + '\nالسبب: دخل بجهاز مرتبط / بوت واتساب');
           }
         }
       }
@@ -603,11 +611,11 @@ async function startBot() {
           let sentTime = m.messageTimestamp ? m.messageTimestamp * 1000 : Date.now();
           let latency = Date.now() - sentTime;
           let verdict = latency < 400 ? '✅ ممتاز - أسرع من أغلب بوتات المبندين' : latency < 800 ? '🟡 متوسط - قريب من بوتات المبندين' : '🔴 بطيء - السيرفر راقد، غير الهوستينج';
-          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (latency / 1000).toFixed(2) + ' ثانية\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv8.6 بلاك + كتم + فحص بوتات' });
+          await sock.sendMessage(from, { text: '⚡ سرعة البوت: ' + (latency / 1000).toFixed(2) + ' ثانية\n📩 وصول الرسالة: ' + latency + 'ms\n\n' + verdict + '\n\nv8.7 بلاك + كتم + فحص بوتات isBot' });
           continue;
         }
         if (isOwnerSender && lower === '.ping') {
-          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v8.6 بلاك + كتم + فحص بوتات - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + ' - حماية بوت: ' + (ANTI_LINKED ? 'ON 🤖' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
+          await sock.sendMessage(from, { text: '✅ Bot online - ⚡ v8.7 بلاك + كتم + فحص بوتات - قلعة: ' + (CASTLE_MODE ? 'ON 🏰' : 'OFF') + ' - استقبال: ' + (ACCEPT_MODE ? 'ON ✅' : 'OFF') + ' - حماية بوت: ' + (ANTI_LINKED ? 'ON 🤖' : 'OFF') + (isExemptGroup ? ' - هادا القروب مستثنى' : '') });
           continue;
         }
         const _ctxEarly = m.message.extendedTextMessage ? m.message.extendedTextMessage.contextInfo : null;
@@ -732,7 +740,6 @@ async function startBot() {
           if (lower === '.قلعة' || lower === '.تفعيل القلعة' || lower === '.قلعه') { await enableCastle('بأمر المالك'); await r('🏰 تم تفعيل القلعة بأمرك - بيضاء بس'); continue; }
           if (lower === '.فتح القلعة' || lower === '.فك القلعة' || lower === '.اطفاء القلعة' || lower === '.الغاء القلعة') { await disableCastle(); await r('🏰 تم فتح القلعة بأمرك - رجع الوضع العادي'); continue; }
           if (lower === '.حالة القلعة') { await r('🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF')); continue; }
-          // ===== v8.6 - فحص الكل مع البوتات =====
           if (lower === '.فحص الكل' || lower === '.فحص كل' || lower === '.تنظيف الكل' || lower === '.تنظيف') {
             if (!isGroup) { await r('⚠️ الفحص يخدم في القروب بس'); continue; }
             try {
@@ -744,7 +751,7 @@ async function startBot() {
               for (let p of meta.participants) {
                 let n = getParticipantNum(p);
                 if (p.admin) continue; if (isMe(p)) continue; if (isWhiteParticipant(p)) continue; if (isOwner(n)) continue;
-                if (isLinkedDevice(p)) { linkedList.push(p); continue; }
+                if (isBotAccount(p)) { linkedList.push(p); continue; }
                 if (!p.phoneNumber) noNumberList.push(p);
               }
               let kickedList = [];
@@ -753,11 +760,10 @@ async function startBot() {
                 if (ok) { kickedList.push(getParticipantNum(p)); if (blackList.indexOf(getParticipantNum(p)) === -1) blackList.push(getParticipantNum(p)); }
               }
               saveLists();
-              await r('🏰 فحص الكل كمل في ' + from + ':\n👥 فحصت: ' + meta.participants.length + '\n👻 من غير رقم لقيت: ' + noNumberList.length + '\n🤖 جهاز مرتبط / بوت لقيت: ' + linkedList.length + '\n✅ طردت: ' + kickedList.length + '\n\n' + (kickedList.length ? kickedList.join('\n') : '✅ نظيف'));
+              await r('🏰 فحص الكل كمل في ' + from + ':\n👥 فحصت: ' + meta.participants.length + '\n👻 من غير رقم لقيت: ' + noNumberList.length + '\n🤖 بوت / جهاز مرتبط لقيت: ' + linkedList.length + '\n✅ طردت: ' + kickedList.length + '\n\n' + (kickedList.length ? kickedList.join('\n') : '✅ نظيف'));
             } catch(e) { await r('خطأ فحص الكل: ' + e.message); }
             continue;
           }
-          // ===== v8.6 - فحص مع البوتات =====
           if (lower === '.فحص' || lower === '.فحص مشبوهين' || lower === '.فحص بوتات' || lower === '.عد' || lower === '.كم') {
             if (!isGroup) { await r('⚠️ الفحص يخدم في القروب بس'); continue; }
             try {
@@ -768,13 +774,13 @@ async function startBot() {
               for (let p of meta.participants) {
                 let n = getParticipantNum(p);
                 if (p.admin) continue; if (isMe(p)) continue; if (isWhiteParticipant(p)) continue; if (isOwner(n)) continue;
-                if (isLinkedDevice(p)) { linkedList.push(n); continue; }
+                if (isBotAccount(p)) { linkedList.push(n); continue; }
                 if (!p.phoneNumber) noNumberList.push(n);
                 else if (isGlobalBlack(p)) blackListFound.push(n);
               }
               if (!iAmAdmin) {
                 let msg = '🔍 فحص - عد بس (البوت مش ادمن هنا) في ' + from + ':\n';
-                msg += '👥 اجمالي الاعضاء: ' + total + '\n👻 جدد من غير رقم: ' + noNumberList.length + '\n🤖 جهاز مرتبط / بوت: ' + linkedList.length + '\n🚫 من البلاك العام: ' + blackListFound.length + '\n';
+                msg += '👥 اجمالي الاعضاء: ' + total + '\n👻 جدد من غير رقم: ' + noNumberList.length + '\n🤖 بوت / جهاز مرتبط: ' + linkedList.length + '\n🚫 من البلاك العام: ' + blackListFound.length + '\n';
                 if (linkedList.length) msg += '\n🤖 بوتات:\n' + linkedList.join('\n') + '\n';
                 if (noNumberList.length) msg += '\n👻 جدد من غير رقم:\n' + noNumberList.join('\n') + '\n';
                 if (blackListFound.length) msg += '\n🚫 بلاك عام:\n' + blackListFound.join('\n');
@@ -790,10 +796,10 @@ async function startBot() {
                 if (ok) { kickedList.push(n); if (blackList.indexOf(n) === -1) blackList.push(n); }
               }
               saveLists();
-              let msg2 = '🏰 فحص كمل في ' + from + ':\n👥 فحصت: ' + total + '\n👻 جدد من غير رقم لقيت: ' + noNumberList.length + '\n🤖 جهاز مرتبط / بوت لقيت: ' + linkedList.length + '\n🚫 بلاك عام لقيت: ' + blackListFound.length + '\n✅ طردت: ' + kickedList.length;
+              let msg2 = '🏰 فحص كمل في ' + from + ':\n👥 فحصت: ' + total + '\n👻 جدد من غير رقم لقيت: ' + noNumberList.length + '\n🤖 بوت / جهاز مرتبط لقيت: ' + linkedList.length + '\n🚫 بلاك عام لقيت: ' + blackListFound.length + '\n✅ طردت: ' + kickedList.length;
               if (kickedList.length) msg2 += '\n\n' + kickedList.join('\n');
               await r(msg2);
-              notifyOwner('🏰 فحص في ' + from + ' - لقيت ' + noNumberList.length + ' جدد من غير رقم و ' + linkedList.length + ' بوت جهاز مرتبط وطردت ' + kickedList.length);
+              notifyOwner('🏰 فحص في ' + from + ' - لقيت ' + noNumberList.length + ' جدد من غير رقم و ' + linkedList.length + ' بوت وطردت ' + kickedList.length);
             } catch(e) { await r('خطأ فحص: ' + e.message); }
             continue;
           }
@@ -815,7 +821,7 @@ async function startBot() {
             menu += '│ 🔇 المكتومين: ' + mutedList.length + '\n';
             menu += '│ 🛡️ مستثنى: ' + exemptGroups.length + '\n';
             menu += '│ 🔗 الروابط: ' + (lockLinks ? 'مقفولة' : 'مفتوحة') + '\n';
-            menu += '│ ⚡ السرعة: v8.6 بلاك + كتم + فحص بوتات\n';
+            menu += '│ ⚡ السرعة: v8.7 بلاك + كتم + فحص بوتات isBot\n';
             menu += '│ 💣 حماية ملغّمة: شغالة - النص محجوب\n';
             menu += '│ 🏰 القلعة: ' + (CASTLE_MODE ? 'مفعلة ON' : 'طافية OFF') + '\n';
             menu += '│ 🤖 حماية بوت: ' + (ANTI_LINKED ? 'شغالة ON' : 'طافية OFF') + '\n';
@@ -1034,7 +1040,7 @@ async function startBot() {
     }
   });
 }
-app.get('/', (req, res) => res.send('Bot Running - v8.6 - Global Black + Mute + Anti Linked Scan'));
+app.get('/', (req, res) => res.send('Bot Running - v8.7 - Global Black + Mute + Anti Bot isBot'));
 app.get('/qr', async (req, res) => {
   if (req.query.key !== QR_SECRET) return res.send('ممنوع - حط key');
   if (!qrCode) return res.send('No QR - Already connected');
