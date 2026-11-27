@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": { "start": "node index.js" },
   "dependencies": {
-    "@whiskeysockets/baileys": "latest",
+    "@pontalabs/baileys": "latest",
     "express": "latest",
     "qrcode": "latest",
     "pino": "latest",
