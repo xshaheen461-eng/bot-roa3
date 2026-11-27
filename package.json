@@ -9,7 +9,6 @@
     "qrcode": "latest",
     "pino": "latest",
     "fluent-ffmpeg": "^2.1.2",
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "wa-sticker-formatter": "latest"
+    "@ffmpeg-installer/ffmpeg": "^1.1.0"
   }
 }
